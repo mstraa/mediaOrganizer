@@ -13,7 +13,7 @@ fn benchmark_file_type_detection(c: &mut Criterion) {
                 Path::new("raw.CR2"),
                 Path::new("document.txt"),
             ];
-            
+
             for path in paths {
                 black_box(media_organizer::types::FileType::from_extension(path));
             }
@@ -34,5 +34,9 @@ fn benchmark_hash_computation(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, benchmark_file_type_detection, benchmark_hash_computation);
+criterion_group!(
+    benches,
+    benchmark_file_type_detection,
+    benchmark_hash_computation
+);
 criterion_main!(benches);

@@ -10,6 +10,9 @@ pub mod types;
 use anyhow::Result;
 use cli::Args;
 
+// Re-export commonly used items
+pub use progress::{setup_logging, ProgressReport, ProgressTracker};
+
 /// Run the media organizer with the given arguments
 /// This is exposed for testing purposes
 pub async fn run_with_args(args: Args) -> Result<()> {

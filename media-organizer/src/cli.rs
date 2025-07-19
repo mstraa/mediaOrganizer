@@ -145,6 +145,10 @@ pub struct Args {
         requires = "report"
     )]
     pub report_path: Option<PathBuf>,
+
+    /// Output report in JSON format
+    #[arg(long, help = "Output summary report in JSON format")]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

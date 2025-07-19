@@ -255,4 +255,44 @@ impl Args {
             true
         }
     }
+    
+    /// Get file types filter if specified
+    pub fn get_file_types(&self) -> Option<Vec<crate::types::FileType>> {
+        use crate::types::FileType;
+        
+        self.types.as_ref().map(|types| {
+            types
+                .iter()
+                .filter_map(|t| {
+                    match t.to_lowercase().as_str() {
+                        "jpg" | "jpeg" => Some(FileType::Jpeg),
+                        "png" => Some(FileType::Png),
+                        "heic" | "heif" => Some(FileType::Heic),
+                        "raw" | "cr2" | "nef" | "arw" | "dng" => Some(FileType::Raw),
+                        "gif" => Some(FileType::Gif),
+                        "bmp" => Some(FileType::Bmp),
+                        "tiff" | "tif" => Some(FileType::Tiff),
+                        "webp" => Some(FileType::Webp),
+                        "mp4" | "m4v" => Some(FileType::Mp4),
+                        "mov" => Some(FileType::Mov),
+                        "avi" => Some(FileType::Avi),
+                        "mkv" => Some(FileType::Mkv),
+                        "webm" => Some(FileType::Webm),
+                        "flv" => Some(FileType::Flv),
+                        "wmv" => Some(FileType::Wmv),
+                        _ => None,
+                    }
+                })
+                .collect()
+        })
+    }
+    
+    /// Get size limits as a tuple
+    pub fn get_size_limits(&self) -> Option<(u64, Option<u64>)> {
+        if self.min_size > 0 || self.max_size.is_some() {
+            Some((self.min_size, self.max_size))
+        } else {
+            None
+        }
+    }
 }

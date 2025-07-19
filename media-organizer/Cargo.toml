@@ -65,6 +65,10 @@ pretty_assertions = "1.4"
 name = "file_scanning"
 harness = false
 
+[[bench]]
+name = "scanner_benchmark"
+harness = false
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

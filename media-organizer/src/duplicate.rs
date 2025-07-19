@@ -84,9 +84,9 @@ impl DuplicateDetector {
         let mut counter = 1;
         loop {
             let new_name = if extension.is_empty() {
-                format!("{}_{}", stem, counter)
+                format!("{stem}_{counter}")
             } else {
-                format!("{}_{}.{}", stem, counter, extension)
+                format!("{stem}_{counter}.{extension}")
             };
             
             let new_path = parent.join(&new_name);
@@ -110,7 +110,7 @@ impl DuplicateDetector {
     pub fn get_statistics(&self) -> DuplicateStatistics {
         let mut stats = DuplicateStatistics::default();
         
-        for (_hash, paths) in &self.duplicates {
+        for paths in self.duplicates.values() {
             if paths.len() > 1 {
                 stats.duplicate_groups += 1;
                 stats.total_duplicates += paths.len() - 1; // Don't count the original

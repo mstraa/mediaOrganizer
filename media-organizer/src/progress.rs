@@ -65,7 +65,7 @@ impl ProgressTracker {
     /// Finish scanning phase
     pub fn finish_scanning(&mut self, total_found: u64) {
         if let Some(bar) = self.scan_bar.take() {
-            bar.finish_with_message(format!("Found {} media files", total_found));
+            bar.finish_with_message(format!("Found {total_found} media files"));
         }
         self.main_bar.set_message("Scan complete");
     }
@@ -99,21 +99,21 @@ impl ProgressTracker {
     /// Report an error during processing
     pub fn report_error(&self, error: &str) {
         if let Some(ref bar) = self.process_bar {
-            bar.println(format!("  ❌ Error: {}", error));
+            bar.println(format!("  ❌ Error: {error}"));
         }
     }
     
     /// Report a skipped file
     pub fn report_skip(&self, reason: &str) {
         if let Some(ref bar) = self.process_bar {
-            bar.println(format!("  ⏭️  Skipped: {}", reason));
+            bar.println(format!("  ⏭️  Skipped: {reason}"));
         }
     }
     
     /// Report a successful operation
     pub fn report_success(&self, message: &str) {
         if let Some(ref bar) = self.process_bar {
-            bar.println(format!("  ✅ {}", message));
+            bar.println(format!("  ✅ {message}"));
         }
     }
     
@@ -168,14 +168,14 @@ pub fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs();
     
     if secs < 60 {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else if secs < 3600 {
         let mins = secs / 60;
         let secs = secs % 60;
-        format!("{}m {}s", mins, secs)
+        format!("{mins}m {secs}s")
     } else {
         let hours = secs / 3600;
         let mins = (secs % 3600) / 60;
-        format!("{}h {}m", hours, mins)
+        format!("{hours}h {mins}m")
     }
 }

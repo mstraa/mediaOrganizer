@@ -138,7 +138,7 @@ pub enum OrganizationPattern {
 }
 
 impl OrganizationPattern {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "year" => Self::Year,
             "year/month" => Self::YearMonth,

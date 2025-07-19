@@ -1,0 +1,30 @@
+[build]
+# Target Apple Silicon by default
+target = "aarch64-apple-darwin"
+
+[target.aarch64-apple-darwin]
+# Enable specific CPU features for M1/M2/M3 processors
+rustflags = [
+    "-C", "target-cpu=apple-m1",
+    "-C", "link-arg=-framework", "-C", "link-arg=CoreFoundation",
+    "-C", "link-arg=-framework", "-C", "link-arg=Security",
+]
+
+[profile.release]
+# Additional optimizations for release builds
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+panic = "abort"
+
+[profile.dev]
+# Faster compilation for development
+opt-level = 0
+debug = true
+
+[profile.bench]
+# Optimizations for benchmarks
+lto = true
+codegen-units = 1
+opt-level = 3

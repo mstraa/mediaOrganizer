@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use tracing::{error, info};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod cli;
 mod duplicate;
@@ -11,17 +10,15 @@ mod scanner;
 mod types;
 
 use cli::Args;
+use progress::setup_logging;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
-
-    // Parse command line arguments
+    // Parse command line arguments first to get verbose flag
     let args = Args::parse();
+
+    // Initialize logging based on verbose flag
+    setup_logging(args.verbose);
 
     // Validate arguments
     args.validate()?;
@@ -93,6 +90,8 @@ async fn run(args: Args) -> Result<()> {
     while let Some(file_info) = rx.recv().await {
         file_count += 1;
         progress.update_scan(file_count);
+        progress.increment_files_scanned(1);
+        progress.add_bytes_processed(file_info.size);
 
         if args.verbose {
             info!("Found: {:?} ({} bytes)", file_info.path, file_info.size);
@@ -123,8 +122,10 @@ async fn run(args: Args) -> Result<()> {
                 if let Some(detector) = duplicate_detector.as_mut() {
                     match detector.check_duplicate(&mut file_info).await {
                         Ok(should_skip) => {
+                            progress.increment_files_hashed(1);
                             if should_skip {
                                 skipped_count += 1;
+                                progress.increment_duplicates(1);
                                 if args.verbose {
                                     info!("Skipping duplicate: {:?}", file_info.path);
                                 }
@@ -134,6 +135,7 @@ async fn run(args: Args) -> Result<()> {
                         },
                         Err(e) => {
                             error!("Error checking duplicate for {:?}: {}", file_info.path, e);
+                            progress.increment_errors();
                             processed_files.push(file_info); // Process anyway
                         },
                     }
@@ -198,12 +200,16 @@ async fn run(args: Args) -> Result<()> {
                     Ok(result) => {
                         if result.success {
                             success_count += 1;
+                            progress.increment_files_organized(1);
+                            progress.report_success(&format!("Organized {:?}", result.source.file_name().unwrap_or_default()));
                             if args.verbose && !args.dry_run {
                                 info!("Organized: {:?} -> {:?}", result.source, result.destination);
                             }
                         } else {
                             error_count += 1;
+                            progress.increment_errors();
                             if let Some(error) = &result.error {
+                                progress.report_error(&format!("{:?}: {}", result.source.file_name().unwrap_or_default(), error));
                                 error!("Failed to organize {:?}: {}", result.source, error);
                             }
                         }
@@ -211,6 +217,8 @@ async fn run(args: Args) -> Result<()> {
                     },
                     Err(e) => {
                         error_count += 1;
+                        progress.increment_errors();
+                        progress.report_error(&format!("{:?}: {}", file_info.path.file_name().unwrap_or_default(), e));
                         error!("Error organizing {:?}: {}", file_info.path, e);
                     },
                 }
@@ -225,14 +233,15 @@ async fn run(args: Args) -> Result<()> {
             );
             progress.finish(&summary);
 
-            // Print detailed summary if verbose
-            if args.verbose && !operations.is_empty() {
-                info!("\nOperation Summary:");
-                info!("  Total files scanned: {}", file_count);
-                info!("  Files processed: {}", total_processed);
-                info!("  Successful operations: {}", success_count);
-                info!("  Failed operations: {}", error_count);
-                info!("  Duplicates skipped: {}", skipped_count);
+            // Print comprehensive summary
+            progress.print_summary();
+
+            // If requested, output JSON report
+            if args.json {
+                let report = progress.generate_report();
+                if let Ok(json) = progress::report_as_json(&report) {
+                    println!("\n{}", json);
+                }
             }
         } else {
             progress.finish("No files to organize after duplicate detection");

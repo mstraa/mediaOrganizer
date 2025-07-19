@@ -118,11 +118,7 @@ pub struct Args {
     pub min_size: u64,
 
     /// Maximum file size to process (in bytes)
-    #[arg(
-        long,
-        value_name = "SIZE",
-        help = "Maximum file size to process"
-    )]
+    #[arg(long, value_name = "SIZE", help = "Maximum file size to process")]
     pub max_size: Option<u64>,
 
     /// Preserve original file timestamps
@@ -157,7 +153,7 @@ pub enum OperationMode {
     Move,
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq)]
 pub enum DuplicateStrategy {
     Skip,
     Rename,
@@ -186,56 +182,61 @@ impl std::fmt::Display for DuplicateStrategy {
 impl Args {
     /// Validate command line arguments
     pub fn validate(&self) -> anyhow::Result<()> {
-        
         // Check if input directory exists
         if !self.input.exists() {
             anyhow::bail!("Input directory does not exist: {}", self.input.display());
         }
-        
+
         if !self.input.is_dir() {
             anyhow::bail!("Input path is not a directory: {}", self.input.display());
         }
-        
+
         // Check if output directory parent exists (create output dir later)
         if let Some(parent) = self.output.parent() {
             if !parent.exists() {
-                anyhow::bail!("Output directory parent does not exist: {}", parent.display());
+                anyhow::bail!(
+                    "Output directory parent does not exist: {}",
+                    parent.display()
+                );
             }
         }
-        
+
         // Check for conflicting flags
         if self.verbose && self.quiet {
             anyhow::bail!("Cannot use both --verbose and --quiet flags");
         }
-        
+
         // Validate file size constraints
         if let Some(max_size) = self.max_size {
             if max_size <= self.min_size {
                 anyhow::bail!("Maximum file size must be greater than minimum file size");
             }
         }
-        
+
         // Validate pattern
         match self.pattern.as_str() {
-            "year" | "year/month" | "year/month/day" | "type" | "type/year/month" => {}
+            "year" | "year/month" | "year/month/day" | "type" | "type/year/month" => {},
             _ => anyhow::bail!("Invalid organization pattern: {}", self.pattern),
         }
-        
+
         // Validate worker count
         if self.workers > 1000 {
             anyhow::bail!("Worker count too high: {}", self.workers);
         }
-        
+
         // Check config file if specified
         if let Some(config_path) = &self.config {
             if !config_path.exists() {
-                anyhow::bail!("Configuration file does not exist: {}", config_path.display());
+                anyhow::bail!(
+                    "Configuration file does not exist: {}",
+                    config_path.display()
+                );
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get the effective number of workers (0 means auto-detect)
     pub fn get_worker_count(&self) -> usize {
         if self.workers == 0 {
@@ -245,7 +246,21 @@ impl Args {
             self.workers
         }
     }
-    
+
+    /// Get the organization pattern as the proper enum type
+    pub fn get_organization_pattern(&self) -> crate::types::OrganizationPattern {
+        use crate::types::OrganizationPattern;
+
+        match self.pattern.as_str() {
+            "year" => OrganizationPattern::Year,
+            "year/month" => OrganizationPattern::YearMonth,
+            "year/month/day" => OrganizationPattern::YearMonthDay,
+            "type" => OrganizationPattern::Type,
+            "type/year/month" => OrganizationPattern::TypeYearMonth,
+            pattern => OrganizationPattern::Custom(pattern.to_string()),
+        }
+    }
+
     /// Check if a file extension should be processed
     pub fn should_process_type(&self, extension: &str) -> bool {
         if let Some(types) = &self.types {
@@ -255,38 +270,36 @@ impl Args {
             true
         }
     }
-    
+
     /// Get file types filter if specified
     pub fn get_file_types(&self) -> Option<Vec<crate::types::FileType>> {
         use crate::types::FileType;
-        
+
         self.types.as_ref().map(|types| {
             types
                 .iter()
-                .filter_map(|t| {
-                    match t.to_lowercase().as_str() {
-                        "jpg" | "jpeg" => Some(FileType::Jpeg),
-                        "png" => Some(FileType::Png),
-                        "heic" | "heif" => Some(FileType::Heic),
-                        "raw" | "cr2" | "nef" | "arw" | "dng" => Some(FileType::Raw),
-                        "gif" => Some(FileType::Gif),
-                        "bmp" => Some(FileType::Bmp),
-                        "tiff" | "tif" => Some(FileType::Tiff),
-                        "webp" => Some(FileType::Webp),
-                        "mp4" | "m4v" => Some(FileType::Mp4),
-                        "mov" => Some(FileType::Mov),
-                        "avi" => Some(FileType::Avi),
-                        "mkv" => Some(FileType::Mkv),
-                        "webm" => Some(FileType::Webm),
-                        "flv" => Some(FileType::Flv),
-                        "wmv" => Some(FileType::Wmv),
-                        _ => None,
-                    }
+                .filter_map(|t| match t.to_lowercase().as_str() {
+                    "jpg" | "jpeg" => Some(FileType::Jpeg),
+                    "png" => Some(FileType::Png),
+                    "heic" | "heif" => Some(FileType::Heic),
+                    "raw" | "cr2" | "nef" | "arw" | "dng" => Some(FileType::Raw),
+                    "gif" => Some(FileType::Gif),
+                    "bmp" => Some(FileType::Bmp),
+                    "tiff" | "tif" => Some(FileType::Tiff),
+                    "webp" => Some(FileType::Webp),
+                    "mp4" | "m4v" => Some(FileType::Mp4),
+                    "mov" => Some(FileType::Mov),
+                    "avi" => Some(FileType::Avi),
+                    "mkv" => Some(FileType::Mkv),
+                    "webm" => Some(FileType::Webm),
+                    "flv" => Some(FileType::Flv),
+                    "wmv" => Some(FileType::Wmv),
+                    _ => None,
                 })
                 .collect()
         })
     }
-    
+
     /// Get size limits as a tuple
     pub fn get_size_limits(&self) -> Option<(u64, Option<u64>)> {
         if self.min_size > 0 || self.max_size.is_some() {

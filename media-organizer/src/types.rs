@@ -13,7 +13,7 @@ pub enum FileType {
     Bmp,
     Tiff,
     Webp,
-    
+
     // Videos
     Mp4,
     Mov,
@@ -22,7 +22,7 @@ pub enum FileType {
     Webm,
     Flv,
     Wmv,
-    
+
     // Other
     Unknown,
 }
@@ -34,7 +34,7 @@ impl FileType {
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase());
-        
+
         match ext.as_deref() {
             // Images
             Some("jpg") | Some("jpeg") => Self::Jpeg,
@@ -45,7 +45,7 @@ impl FileType {
             Some("bmp") => Self::Bmp,
             Some("tiff") | Some("tif") => Self::Tiff,
             Some("webp") => Self::Webp,
-            
+
             // Videos
             Some("mp4") | Some("m4v") => Self::Mp4,
             Some("mov") => Self::Mov,
@@ -54,11 +54,11 @@ impl FileType {
             Some("webm") => Self::Webm,
             Some("flv") => Self::Flv,
             Some("wmv") => Self::Wmv,
-            
+
             _ => Self::Unknown,
         }
     }
-    
+
     /// Check if this is an image type
     pub fn is_image(&self) -> bool {
         matches!(
@@ -73,7 +73,7 @@ impl FileType {
                 | Self::Webp
         )
     }
-    
+
     /// Check if this is a video type
     pub fn is_video(&self) -> bool {
         matches!(
@@ -81,7 +81,7 @@ impl FileType {
             Self::Mp4 | Self::Mov | Self::Avi | Self::Mkv | Self::Webm | Self::Flv | Self::Wmv
         )
     }
-    
+
     /// Get the category name for organization
     pub fn category(&self) -> &'static str {
         if self.is_image() {

@@ -20,11 +20,11 @@ async fn test_basic_functionality() {
     let temp_dir = tempdir().unwrap();
     let input_path = temp_dir.path().join("input");
     let output_path = temp_dir.path().join("output");
-    
+
     // Create test directories
     std::fs::create_dir_all(&input_path).unwrap();
     std::fs::create_dir_all(&output_path).unwrap();
-    
+
     // Verify directories were created
     assert!(input_path.exists());
     assert!(output_path.exists());

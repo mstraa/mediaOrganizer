@@ -1,9 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use media_organizer::scanner::Scanner;
 use media_organizer::types::FileType;
+use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use std::fs;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -23,7 +23,7 @@ fn create_test_files(dir: &TempDir, count: usize) {
 
 fn benchmark_scanner_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("scanner_throughput");
-    
+
     for file_count in [100, 1000, 10000].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(file_count),
@@ -31,25 +31,23 @@ fn benchmark_scanner_throughput(c: &mut Criterion) {
             |b, &file_count| {
                 let temp_dir = TempDir::new().unwrap();
                 create_test_files(&temp_dir, file_count);
-                
+
                 b.iter(|| {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let scanner = Scanner::new(temp_dir.path().to_path_buf())
                             .with_batch_size(100)
                             .with_worker_threads(4);
-                        
+
                         let (tx, mut rx) = mpsc::channel(1000);
-                        
-                        let scan_handle = tokio::spawn(async move {
-                            scanner.scan(tx).await
-                        });
-                        
+
+                        let scan_handle = tokio::spawn(async move { scanner.scan(tx).await });
+
                         let mut count = 0;
                         while let Some(_) = rx.recv().await {
                             count += 1;
                         }
-                        
+
                         scan_handle.await.unwrap().unwrap();
                         black_box(count);
                     });
@@ -57,7 +55,7 @@ fn benchmark_scanner_throughput(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -65,24 +63,21 @@ fn benchmark_scanner_memory(c: &mut Criterion) {
     c.bench_function("scanner_memory_10k_files", |b| {
         let temp_dir = TempDir::new().unwrap();
         create_test_files(&temp_dir, 10000);
-        
+
         b.iter(|| {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let scanner = Scanner::new(temp_dir.path().to_path_buf())
-                    .with_batch_size(1000);
-                
+                let scanner = Scanner::new(temp_dir.path().to_path_buf()).with_batch_size(1000);
+
                 let (tx, mut rx) = mpsc::channel(100); // Small buffer to test streaming
-                
-                let scan_handle = tokio::spawn(async move {
-                    scanner.scan(tx).await
-                });
-                
+
+                let scan_handle = tokio::spawn(async move { scanner.scan(tx).await });
+
                 // Simulate slow consumer to test memory pressure
                 while let Some(_) = rx.recv().await {
                     tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                 }
-                
+
                 scan_handle.await.unwrap().unwrap();
             });
         });
@@ -100,7 +95,7 @@ fn benchmark_file_type_detection(c: &mut Criterion) {
             PathBuf::from("test.MOV"),
             PathBuf::from("test.unknown"),
         ];
-        
+
         b.iter(|| {
             for path in &paths {
                 black_box(FileType::from_extension(path));

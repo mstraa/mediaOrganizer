@@ -86,7 +86,12 @@ pub async fn run_with_args(args: Args) -> Result<()> {
 
         // Initialize duplicate detector if enabled
         if args.detect_duplicates {
-            duplicate_detector = Some(DuplicateDetector::new(args.duplicate_strategy));
+            let hash_workers = args.hash_workers.or(Some(args.get_worker_count()));
+            let mut detector = DuplicateDetector::new(args.duplicate_strategy);
+            if let Some(workers) = hash_workers {
+                detector = detector.with_hash_workers(workers);
+            }
+            duplicate_detector = Some(detector);
             
             // Pre-scan output directory for existing files
             if let Some(detector) = duplicate_detector.as_mut() {

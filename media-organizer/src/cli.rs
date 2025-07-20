@@ -97,6 +97,14 @@ pub struct OrganizeArgs {
     )]
     pub workers: usize,
 
+    /// Number of parallel workers for hash computation
+    #[arg(
+        long,
+        value_name = "NUM",
+        help = "Number of parallel workers for hash computation (defaults to workers value)"
+    )]
+    pub hash_workers: Option<usize>,
+
     /// Verbose output
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
@@ -196,6 +204,14 @@ pub struct DedupArgs {
         help = "Number of parallel workers (0 = auto-detect)"
     )]
     pub workers: usize,
+
+    /// Number of parallel workers for hash computation
+    #[arg(
+        long,
+        value_name = "NUM",
+        help = "Number of parallel workers for hash computation (defaults to workers value)"
+    )]
+    pub hash_workers: Option<usize>,
 
     /// Verbose output
     #[arg(short, long, help = "Enable verbose output")]

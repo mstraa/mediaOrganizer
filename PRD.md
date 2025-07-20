@@ -82,6 +82,11 @@ Apple Silicon (M1/M2/M3) macOS systems
 - Skip copying if identical file already exists in destination
 - Log duplicate detections for user awareness
 - Support for standalone deduplication within a directory
+- **Persistent Hash Database**: Store computed hashes in `db.mediaorg` file at output root
+  - Dramatically reduces processing time on subsequent runs
+  - Only rehashes new or modified files (checks size and modification time)
+  - Compressed binary format for efficient storage
+  - Automatic cleanup of obsolete entries
 
 #### Progress & Logging
 - Display real-time progress (files processed, estimated time remaining)
@@ -161,6 +166,10 @@ media-organizer dedup \
 - Utilize Apple Silicon's unified memory architecture
 - Leverage multiple CPU cores for parallel processing
 - Stream processing to avoid loading all files into memory
+- **Hash Database Optimization**: Skip re-hashing unchanged files on subsequent runs
+  - First run: Full hash computation for all files
+  - Subsequent runs: Only hash new/modified files
+  - Example: 1M files with 1K changes = 99.9% reduction in hash operations
 
 ### 5.2 Technical Requirements
 - Native compilation for Apple Silicon (arm64)

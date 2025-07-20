@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod cli;
+pub mod database;
 pub mod dedup;
 pub mod duplicate;
 pub mod organizer;
@@ -111,7 +112,7 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                     ]
                 });
                 
-                match detector.scan_output_directory(&args.output, &file_types).await {
+                match detector.scan_output_directory_with_progress(&args.output, &file_types, Some(&progress)).await {
                     Ok(_) => {
                         let stats = detector.get_statistics();
                         if stats.existing_in_output > 0 {

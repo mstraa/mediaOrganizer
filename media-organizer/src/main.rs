@@ -3,6 +3,7 @@ use clap::Parser;
 use tracing::{error, info};
 
 mod cli;
+mod database;
 mod dedup;
 mod duplicate;
 mod organizer;

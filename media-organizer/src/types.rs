@@ -101,6 +101,7 @@ pub struct FileInfo {
     pub file_type: FileType,
     pub size: u64,
     pub modified: DateTime<Local>,
+    #[allow(dead_code)]
     pub created: Option<DateTime<Local>>,
     pub hash: Option<String>,
     pub metadata: MediaMetadata,
@@ -115,11 +116,13 @@ pub struct MediaMetadata {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration: Option<std::time::Duration>,
+    #[allow(dead_code)]
     pub location: Option<Location>,
 }
 
 /// GPS location information
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Location {
     pub latitude: f64,
     pub longitude: f64,
@@ -138,6 +141,7 @@ pub enum OrganizationPattern {
 }
 
 impl OrganizationPattern {
+    #[allow(dead_code)]
     pub fn parse(s: &str) -> Self {
         match s {
             "year" => Self::Year,
@@ -157,11 +161,13 @@ pub struct OperationResult {
     pub destination: PathBuf,
     pub success: bool,
     pub error: Option<String>,
+    #[allow(dead_code)]
     pub is_duplicate: bool,
 }
 
 /// Statistics for the operation
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct Statistics {
     pub files_scanned: usize,
     pub files_processed: usize,

@@ -3,50 +3,72 @@ use clap::Parser;
 use tracing::{error, info};
 
 mod cli;
+mod dedup;
 mod duplicate;
 mod organizer;
 mod progress;
 mod scanner;
 mod types;
 
-use cli::Args;
+use cli::{Cli, Commands};
 use progress::setup_logging;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Parse command line arguments first to get verbose flag
-    let args = Args::parse();
+    // Parse command line arguments
+    let cli = Cli::parse();
 
-    // Initialize logging based on verbose flag
-    setup_logging(args.verbose);
+    match cli.command {
+        Commands::Organize(args) => {
+            // Initialize logging based on verbose flag
+            setup_logging(args.verbose);
 
-    // Validate arguments
-    args.validate()?;
+            // Validate arguments
+            args.validate()?;
 
-    info!("Starting Media Organizer");
-    info!("Input directory: {}", args.input.display());
-    info!("Output directory: {}", args.output.display());
-    info!("Workers: {}", args.get_worker_count());
+            info!("Starting Media Organizer");
+            info!("Input directory: {}", args.input.display());
+            info!("Output directory: {}", args.output.display());
+            info!("Workers: {}", args.get_worker_count());
 
-    // TODO: Implement main logic
-    // 1. Scan input directory
-    // 2. Detect duplicates if enabled
-    // 3. Organize files
-    // 4. Execute operations (copy/move)
-
-    match run(args).await {
-        Ok(()) => {
-            info!("Media organization completed successfully");
-            Ok(())
+            match run_organize(args).await {
+                Ok(()) => {
+                    info!("Media organization completed successfully");
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Error during media organization: {}", e);
+                    Err(e)
+                },
+            }
         },
-        Err(e) => {
-            error!("Error during media organization: {}", e);
-            Err(e)
+        Commands::Dedup(args) => {
+            // Initialize logging based on verbose flag
+            setup_logging(args.verbose);
+
+            // Validate arguments
+            args.validate()?;
+
+            info!("Starting Deduplication");
+            info!("Directory: {}", args.directory.display());
+            info!("Workers: {}", args.get_worker_count());
+
+            let mut deduplicator = dedup::Deduplicator::new(args);
+            match deduplicator.run().await {
+                Ok(()) => {
+                    info!("Deduplication completed successfully");
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Error during deduplication: {}", e);
+                    Err(e)
+                },
+            }
         },
     }
 }
 
-async fn run(args: Args) -> Result<()> {
+async fn run_organize(args: cli::OrganizeArgs) -> Result<()> {
     use crate::duplicate::DuplicateDetector;
     use crate::organizer::Organizer;
     use crate::progress::ProgressTracker;
@@ -71,7 +93,9 @@ async fn run(args: Args) -> Result<()> {
 
     scanner = scanner
         .with_batch_size(1000)
-        .with_worker_threads(args.get_worker_count());
+        .with_worker_threads(args.get_worker_count())
+        .with_exclude_patterns(args.exclude.clone())
+        .with_follow_links(args.follow_links);
 
     // Start scanning phase
     progress.start_scanning(None);
@@ -113,6 +137,45 @@ async fn run(args: Args) -> Result<()> {
         // Initialize duplicate detector if enabled
         if args.detect_duplicates {
             duplicate_detector = Some(DuplicateDetector::new(args.duplicate_strategy));
+            
+            // Pre-scan output directory for existing files
+            if let Some(detector) = duplicate_detector.as_mut() {
+                info!("Pre-scanning output directory for existing files...");
+                let file_types = args.get_file_types().unwrap_or_else(|| {
+                    // Include all image and video types by default
+                    vec![
+                        crate::types::FileType::Jpeg,
+                        crate::types::FileType::Png,
+                        crate::types::FileType::Heic,
+                        crate::types::FileType::Raw,
+                        crate::types::FileType::Gif,
+                        crate::types::FileType::Bmp,
+                        crate::types::FileType::Tiff,
+                        crate::types::FileType::Webp,
+                        crate::types::FileType::Mp4,
+                        crate::types::FileType::Mov,
+                        crate::types::FileType::Avi,
+                        crate::types::FileType::Mkv,
+                        crate::types::FileType::Webm,
+                        crate::types::FileType::Flv,
+                        crate::types::FileType::Wmv,
+                    ]
+                });
+                
+                match detector.scan_output_directory(&args.output, &file_types).await {
+                    Ok(_) => {
+                        let stats = detector.get_statistics();
+                        if stats.existing_in_output > 0 {
+                            info!("Found {} existing files in output directory", stats.existing_in_output);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error pre-scanning output directory: {}", e);
+                        // Continue anyway - we'll just miss existing duplicates
+                    }
+                }
+            }
+            
             progress.start_duplicate_detection(files.len() as u64);
 
             // Process files through duplicate detector
@@ -153,6 +216,12 @@ async fn run(args: Args) -> Result<()> {
                     "Duplicates found: {} groups with {} total duplicates",
                     stats.duplicate_groups, stats.total_duplicates
                 );
+                if stats.existing_in_output > 0 {
+                    info!(
+                        "Files already in output directory: {} (these were skipped)",
+                        stats.existing_in_output
+                    );
+                }
             }
         } else {
             processed_files = files;

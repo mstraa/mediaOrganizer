@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A high-performance CLI tool for organizing media files on macOS
@@ -8,10 +8,25 @@ use std::path::PathBuf;
     version,
     author,
     about,
-    long_about = None,
-    arg_required_else_help = true
+    long_about = None
 )]
-pub struct Args {
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Organize media files from input to output directory
+    Organize(OrganizeArgs),
+    
+    /// Remove duplicate files within a directory
+    Dedup(DedupArgs),
+}
+
+/// Arguments for the organize command
+#[derive(Parser, Debug)]
+pub struct OrganizeArgs {
     /// Input directory containing media files to organize
     #[arg(short, long, value_name = "DIR")]
     pub input: PathBuf,
@@ -151,6 +166,85 @@ pub struct Args {
     pub json: bool,
 }
 
+/// Arguments for the dedup command
+#[derive(Parser, Debug)]
+pub struct DedupArgs {
+    /// Directory to scan for duplicates
+    #[arg(short, long, value_name = "DIR")]
+    pub directory: PathBuf,
+
+    /// File types to process (default: all supported types)
+    #[arg(
+        short = 't',
+        long,
+        value_name = "TYPES",
+        value_delimiter = ',',
+        help = "Comma-separated list of file types: jpg,png,mp4,mov,heic,raw"
+    )]
+    pub types: Option<Vec<String>>,
+
+    /// Enable dry run mode (preview without deleting files)
+    #[arg(long, help = "Preview which files would be deleted without making changes")]
+    pub dry_run: bool,
+
+    /// Number of parallel workers
+    #[arg(
+        short = 'j',
+        long,
+        value_name = "NUM",
+        default_value = "0",
+        help = "Number of parallel workers (0 = auto-detect)"
+    )]
+    pub workers: usize,
+
+    /// Verbose output
+    #[arg(short, long, help = "Enable verbose output")]
+    pub verbose: bool,
+
+    /// Quiet mode (suppress non-error output)
+    #[arg(short, long, help = "Suppress non-error output")]
+    pub quiet: bool,
+
+    /// Exclude patterns
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "PATTERN",
+        help = "Patterns to exclude (can be specified multiple times)"
+    )]
+    pub exclude: Vec<String>,
+
+    /// Minimum file size to process (in bytes)
+    #[arg(
+        long,
+        value_name = "SIZE",
+        default_value = "0",
+        help = "Minimum file size to process"
+    )]
+    pub min_size: u64,
+
+    /// Maximum file size to process (in bytes)
+    #[arg(long, value_name = "SIZE", help = "Maximum file size to process")]
+    pub max_size: Option<u64>,
+
+    /// Follow symbolic links
+    #[arg(long, help = "Follow symbolic links")]
+    pub follow_links: bool,
+
+    /// Force deletion without confirmation
+    #[arg(short, long, help = "Skip confirmation prompt (use with caution!)")]
+    pub force: bool,
+
+    /// Output report in JSON format
+    #[arg(long, help = "Output summary report in JSON format")]
+    pub json: bool,
+
+    /// Save list of deleted files to a file
+    #[arg(long, value_name = "FILE", help = "Save list of deleted files to a file")]
+    pub save_list: Option<PathBuf>,
+}
+
+// Keep the existing enums
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OperationMode {
     Copy,
@@ -183,7 +277,10 @@ impl std::fmt::Display for DuplicateStrategy {
     }
 }
 
-impl Args {
+// Keep backward compatibility by providing an alias
+pub type Args = OrganizeArgs;
+
+impl OrganizeArgs {
     /// Validate command line arguments
     pub fn validate(&self) -> anyhow::Result<()> {
         // Check if input directory exists
@@ -265,13 +362,85 @@ impl Args {
         }
     }
 
-    /// Check if a file extension should be processed
-    pub fn should_process_type(&self, extension: &str) -> bool {
-        if let Some(types) = &self.types {
-            types.iter().any(|t| t.eq_ignore_ascii_case(extension))
+
+    /// Get file types filter if specified
+    pub fn get_file_types(&self) -> Option<Vec<crate::types::FileType>> {
+        use crate::types::FileType;
+
+        self.types.as_ref().map(|types| {
+            types
+                .iter()
+                .filter_map(|t| match t.to_lowercase().as_str() {
+                    "jpg" | "jpeg" => Some(FileType::Jpeg),
+                    "png" => Some(FileType::Png),
+                    "heic" | "heif" => Some(FileType::Heic),
+                    "raw" | "cr2" | "nef" | "arw" | "dng" => Some(FileType::Raw),
+                    "gif" => Some(FileType::Gif),
+                    "bmp" => Some(FileType::Bmp),
+                    "tiff" | "tif" => Some(FileType::Tiff),
+                    "webp" => Some(FileType::Webp),
+                    "mp4" | "m4v" => Some(FileType::Mp4),
+                    "mov" => Some(FileType::Mov),
+                    "avi" => Some(FileType::Avi),
+                    "mkv" => Some(FileType::Mkv),
+                    "webm" => Some(FileType::Webm),
+                    "flv" => Some(FileType::Flv),
+                    "wmv" => Some(FileType::Wmv),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// Get size limits as a tuple
+    pub fn get_size_limits(&self) -> Option<(u64, Option<u64>)> {
+        if self.min_size > 0 || self.max_size.is_some() {
+            Some((self.min_size, self.max_size))
         } else {
-            // Process all supported types by default
-            true
+            None
+        }
+    }
+}
+
+impl DedupArgs {
+    /// Validate dedup command arguments
+    pub fn validate(&self) -> anyhow::Result<()> {
+        // Check if directory exists
+        if !self.directory.exists() {
+            anyhow::bail!("Directory does not exist: {}", self.directory.display());
+        }
+
+        if !self.directory.is_dir() {
+            anyhow::bail!("Path is not a directory: {}", self.directory.display());
+        }
+
+        // Check for conflicting flags
+        if self.verbose && self.quiet {
+            anyhow::bail!("Cannot use both --verbose and --quiet flags");
+        }
+
+        // Validate file size constraints
+        if let Some(max_size) = self.max_size {
+            if max_size <= self.min_size {
+                anyhow::bail!("Maximum file size must be greater than minimum file size");
+            }
+        }
+
+        // Validate worker count
+        if self.workers > 1000 {
+            anyhow::bail!("Worker count too high: {}", self.workers);
+        }
+
+        Ok(())
+    }
+
+    /// Get the effective number of workers (0 means auto-detect)
+    pub fn get_worker_count(&self) -> usize {
+        if self.workers == 0 {
+            // Auto-detect based on CPU cores
+            num_cpus::get()
+        } else {
+            self.workers
         }
     }
 

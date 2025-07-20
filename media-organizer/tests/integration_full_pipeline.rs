@@ -38,6 +38,7 @@ async fn test_full_pipeline_with_duplicates() {
         follow_links: false,
         log_file: None,
         report: false,
+        json: false,
     };
 
     // Run the main function
@@ -107,6 +108,7 @@ async fn test_dry_run_mode() {
         follow_links: false,
         log_file: None,
         report: false,
+        json: false,
     };
 
     // Run the main function
@@ -164,6 +166,7 @@ async fn test_duplicate_rename_strategy() {
         follow_links: false,
         log_file: None,
         report: false,
+        json: false,
     };
 
     // Run the main function
@@ -181,5 +184,85 @@ async fn test_duplicate_rename_strategy() {
         output_files.len(),
         3,
         "All files should be copied with rename strategy"
+    );
+}
+
+#[tokio::test]
+async fn test_cross_directory_duplicate_detection() {
+    let input_dir = TempDir::new().unwrap();
+    let output_dir = TempDir::new().unwrap();
+
+    // Create existing files in output directory
+    let existing_content = b"existing file content";
+    let output_images_dir = output_dir.path().join("images");
+    fs::create_dir_all(&output_images_dir).unwrap();
+    fs::write(output_images_dir.join("existing.jpg"), existing_content).unwrap();
+
+    // Create input files - one duplicate of existing, one new
+    fs::write(input_dir.path().join("duplicate.jpg"), existing_content).unwrap();
+    fs::write(input_dir.path().join("new.jpg"), b"new file content").unwrap();
+
+    // Create args with duplicate detection
+    let args = Args {
+        input: input_dir.path().to_path_buf(),
+        output: output_dir.path().to_path_buf(),
+        pattern: "type".to_string(),
+        mode: OperationMode::Copy,
+        workers: 0,
+        verbose: true,
+        quiet: true,
+        dry_run: false,
+        detect_duplicates: true,
+        duplicate_strategy: DuplicateStrategy::Skip,
+        types: None,
+        exclude: vec![],
+        min_size: 0,
+        max_size: None,
+        preserve_timestamps: false,
+        config: None,
+        report_path: None,
+        follow_links: false,
+        log_file: None,
+        report: false,
+        json: false,
+    };
+
+    // Run the main function
+    let result = media_organizer::run_with_args(args).await;
+    assert!(result.is_ok(), "Pipeline should complete successfully");
+
+    // Count files in output after operation
+    let output_files: Vec<_> = walkdir::WalkDir::new(output_dir.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+
+    // Should have 2 files total: existing.jpg + new.jpg (duplicate.jpg was skipped)
+    assert_eq!(
+        output_files.len(),
+        2,
+        "Should have 2 files: existing file + new file (duplicate was skipped)"
+    );
+
+    // Verify the new file was copied
+    let new_file_exists = output_files.iter().any(|entry| {
+        entry.file_name().to_str().unwrap().contains("new")
+    });
+    assert!(new_file_exists, "New file should have been copied");
+
+    // Verify no duplicate of existing file was created
+    let duplicate_count = output_files.iter().filter(|entry| {
+        if let Ok(content) = fs::read(entry.path()) {
+            content == existing_content
+        } else {
+            false
+        }
+    }).count();
+    
+    assert_eq!(
+        duplicate_count,
+        1,
+        "Should only have one file with the existing content"
     );
 }

@@ -1,20 +1,31 @@
 use crate::cli::DuplicateStrategy;
+use crate::database::HashDatabase;
+use crate::progress::ProgressTracker;
 use crate::types::FileInfo;
 use anyhow::Result;
 use blake3::Hasher;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
 use tracing::{debug, info, warn};
 
-/// Duplicate detector using BLAKE3 hashing
+/// Duplicate detector using BLAKE3 hashing with persistent database
 pub struct DuplicateDetector {
     strategy: DuplicateStrategy,
+    /// In-memory hash cache for current session
     hash_cache: HashMap<PathBuf, String>,
+    /// Duplicates found in current batch
     duplicates: HashMap<String, Vec<PathBuf>>,
     /// Hashes of files that already exist in the output directory
     existing_hashes: HashMap<String, PathBuf>,
+    /// Persistent database of file hashes
+    database: HashDatabase,
+    /// Output directory path
+    output_dir: PathBuf,
+    /// Whether database needs saving
+    database_modified: bool,
 }
 
 impl DuplicateDetector {
@@ -24,21 +35,122 @@ impl DuplicateDetector {
             hash_cache: HashMap::new(),
             duplicates: HashMap::new(),
             existing_hashes: HashMap::new(),
+            database: HashDatabase::new(),
+            output_dir: PathBuf::new(),
+            database_modified: false,
         }
     }
 
-    /// Pre-scan output directory to build hash index of existing files
-    pub async fn scan_output_directory(&mut self, output_dir: &Path, file_types: &[crate::types::FileType]) -> Result<()> {
+    /// Initialize with database from output directory
+    pub async fn with_database(strategy: DuplicateStrategy, output_dir: &Path) -> Result<Self> {
+        info!("Loading hash database from output directory");
+        
+        let database = HashDatabase::load(output_dir).await?;
+        
+        Ok(Self {
+            strategy,
+            hash_cache: HashMap::new(),
+            duplicates: HashMap::new(),
+            existing_hashes: HashMap::new(),
+            database,
+            output_dir: output_dir.to_path_buf(),
+            database_modified: false,
+        })
+    }
+    
+    /// Initialize with database from output directory, with progress tracking
+    pub async fn with_database_and_progress(strategy: DuplicateStrategy, output_dir: &Path, progress: &ProgressTracker) -> Result<Self> {
+        info!("Loading hash database from output directory");
+        
+        progress.report_success("Loading duplicate database...");
+        let database = HashDatabase::load(output_dir).await?;
+        
+        let stats = database.stats();
+        progress.report_success(&format!("Loaded database with {} entries ({} unique hashes)", 
+            stats.total_files, stats.unique_hashes));
+        
+        Ok(Self {
+            strategy,
+            hash_cache: HashMap::new(),
+            duplicates: HashMap::new(),
+            existing_hashes: HashMap::new(),
+            database,
+            output_dir: output_dir.to_path_buf(),
+            database_modified: false,
+        })
+    }
+
+    /// Pre-scan output directory to build hash index of existing files with progress tracking
+    pub async fn scan_output_directory_with_progress(&mut self, output_dir: &Path, file_types: &[crate::types::FileType], progress: Option<&ProgressTracker>) -> Result<()> {
         use crate::scanner::Scanner;
         use tokio::sync::mpsc;
         
         info!("Pre-scanning output directory for existing files: {:?}", output_dir);
         
-        if !output_dir.exists() {
-            debug!("Output directory does not exist yet, skipping pre-scan");
-            return Ok(());
-        }
+        self.output_dir = output_dir.to_path_buf();
         
+        // First, try to load existing database
+        let _db_loaded = match HashDatabase::load(output_dir).await {
+            Ok(db) => {
+                info!("Loaded existing database with {} entries", db.stats().total_files);
+                
+                if let Some(p) = progress {
+                    p.report_success(&format!("Loaded existing database with {} entries", db.stats().total_files));
+                }
+                
+                self.database = db;
+                
+                // Clean up obsolete entries
+                let removed = self.database.cleanup().await?;
+                if removed > 0 {
+                    self.database_modified = true;
+                    if let Some(p) = progress {
+                        p.report_success(&format!("Cleaned up {} obsolete entries", removed));
+                    }
+                }
+                
+                // Populate existing_hashes from database
+                let stats = self.database.stats();
+                for (hash, paths) in self.database.hash_index.iter() {
+                    if let Some(first_path) = paths.first() {
+                        self.existing_hashes.insert(hash.clone(), first_path.clone());
+                    }
+                }
+                
+                info!("Database contains {} unique hashes, {} duplicates in {} groups", 
+                      stats.unique_hashes, stats.total_duplicates, stats.duplicate_groups);
+                true
+            }
+            Err(e) => {
+                debug!("Could not load database ({}), will scan files", e);
+                
+                if let Some(p) = progress {
+                    p.report_success("No existing database found, will create new one");
+                }
+                
+                if !output_dir.exists() {
+                    debug!("Output directory does not exist yet, skipping pre-scan");
+                    return Ok(());
+                }
+                false
+            }
+        };
+        
+        // Create progress bar for hash computation
+        let hash_progress = if let Some(_p) = progress {
+            let bar = ProgressBar::new_spinner();
+            bar.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg} [{elapsed_precise}]")
+                    .unwrap()
+            );
+            bar.set_message("Scanning for new/modified files...");
+            Some(bar)
+        } else {
+            None
+        };
+        
+        // Scan for new files not in database
         let scanner = Scanner::new(output_dir.to_path_buf())
             .with_file_types(file_types.to_vec())
             .with_batch_size(1000);
@@ -51,13 +163,65 @@ impl DuplicateDetector {
         });
         
         let mut count = 0;
+        let mut new_count = 0;
+        let mut files_to_hash = Vec::new();
+        
+        // First pass: collect files that need hashing
         while let Some(file_info) = rx.recv().await {
+            count += 1;
+            
+            // Check if file is already in database with current metadata
+            let needs_rehash = if let Some(entry) = self.database.get(&file_info.path) {
+                // Check if file was modified since last hash
+                let file_modified = file_info.modified.timestamp();
+                file_modified != entry.modified || file_info.size != entry.size
+            } else {
+                true
+            };
+            
+            if needs_rehash {
+                files_to_hash.push(file_info);
+            } else {
+                // Use hash from database
+                if let Some(entry) = self.database.get(&file_info.path) {
+                    self.existing_hashes.insert(entry.hash.clone(), file_info.path);
+                }
+            }
+        }
+        
+        scan_handle.await??;
+        
+        // Update progress bar for hashing phase
+        if let Some(bar) = &hash_progress {
+            if !files_to_hash.is_empty() {
+                bar.set_length(files_to_hash.len() as u64);
+                bar.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.green} Hashing files: {bar:40.cyan/blue} {pos}/{len} [{elapsed_precise}]")
+                        .unwrap()
+                        .progress_chars("=>-")
+                );
+            }
+        }
+        
+        // Second pass: hash the files that need it
+        for (idx, file_info) in files_to_hash.into_iter().enumerate() {
             match self.compute_hash(&file_info.path).await {
                 Ok(hash) => {
+                    // Update database
+                    self.database.insert(
+                        file_info.path.clone(),
+                        hash.clone(),
+                        file_info.size,
+                        file_info.modified.timestamp(),
+                    );
+                    self.database_modified = true;
+                    
                     self.existing_hashes.insert(hash, file_info.path);
-                    count += 1;
-                    if count % 100 == 0 {
-                        debug!("Pre-scanned {} existing files", count);
+                    new_count += 1;
+                    
+                    if let Some(bar) = &hash_progress {
+                        bar.set_position((idx + 1) as u64);
                     }
                 }
                 Err(e) => {
@@ -66,17 +230,49 @@ impl DuplicateDetector {
             }
         }
         
-        scan_handle.await??;
-        info!("Pre-scan complete: found {} existing files in output directory", count);
+        if let Some(bar) = hash_progress {
+            bar.finish_with_message(format!("Pre-scan complete: {} files processed, {} new/modified files hashed", count, new_count));
+        }
+        
+        info!("Pre-scan complete: {} files processed, {} new/modified files hashed", count, new_count);
+        
+        // Save database if modified
+        if self.database_modified {
+            if let Some(p) = progress {
+                p.report_success("Saving updated database...");
+            }
+            self.save_database().await?;
+            if let Some(p) = progress {
+                p.report_success(&format!("Database saved with {} entries", self.database.stats().total_files));
+            }
+        }
         
         Ok(())
+    }
+    
+    /// Pre-scan output directory to build hash index of existing files
+    pub async fn scan_output_directory(&mut self, output_dir: &Path, file_types: &[crate::types::FileType]) -> Result<()> {
+        self.scan_output_directory_with_progress(output_dir, file_types, None).await
     }
 
     /// Compute hash for a file
     pub async fn compute_hash(&mut self, path: &Path) -> Result<String> {
-        // Check cache first
+        // Check in-memory cache first
         if let Some(hash) = self.hash_cache.get(path) {
             return Ok(hash.clone());
+        }
+
+        // Check database cache
+        if let Some(entry) = self.database.get(path) {
+            // Verify file hasn't changed
+            let metadata = tokio::fs::metadata(path).await?;
+            let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+            let size = metadata.len();
+            
+            if modified == entry.modified && size == entry.size {
+                self.hash_cache.insert(path.to_path_buf(), entry.hash.clone());
+                return Ok(entry.hash.clone());
+            }
         }
 
         debug!("Computing hash for {:?}", path);
@@ -106,6 +302,15 @@ impl DuplicateDetector {
         let hash = self.compute_hash(&file_info.path).await?;
         file_info.hash = Some(hash.clone());
 
+        // Update database with this file's hash
+        self.database.insert(
+            file_info.path.clone(),
+            hash.clone(),
+            file_info.size,
+            file_info.modified.timestamp(),
+        );
+        self.database_modified = true;
+
         // First check if this file already exists in the output directory
         if let Some(existing_path) = self.existing_hashes.get(&hash) {
             info!("File already exists in output directory: {:?} (original: {:?})", 
@@ -130,6 +335,14 @@ impl DuplicateDetector {
             self.duplicates.insert(hash, vec![file_info.path.clone()]);
             Ok(false)
         }
+    }
+
+    /// Save the database to disk
+    pub async fn save_database(&self) -> Result<()> {
+        if !self.output_dir.as_os_str().is_empty() {
+            self.database.save(&self.output_dir).await?;
+        }
+        Ok(())
     }
 
     /// Get a renamed path for a duplicate file
@@ -185,6 +398,12 @@ impl DuplicateDetector {
 
         stats.unique_files = self.duplicates.len();
         stats.existing_in_output = self.existing_hashes.len();
+        
+        // Add database statistics
+        let db_stats = self.database.stats();
+        stats.database_entries = db_stats.total_files;
+        stats.database_duplicates = db_stats.total_duplicates;
+        
         stats
     }
 }
@@ -195,6 +414,45 @@ pub struct DuplicateStatistics {
     pub duplicate_groups: usize,
     pub total_duplicates: usize,
     pub existing_in_output: usize,
+    pub database_entries: usize,
+    pub database_duplicates: usize,
+}
+
+// Implement Drop to save database when detector is dropped
+impl Drop for DuplicateDetector {
+    fn drop(&mut self) {
+        if self.database_modified && !self.output_dir.as_os_str().is_empty() {
+            // Use blocking I/O in drop
+            if let Err(e) = std::fs::create_dir_all(&self.output_dir) {
+                warn!("Failed to create output directory for database: {}", e);
+                return;
+            }
+            
+            // Convert to blocking save
+            let db_data = match bincode::serialize(&self.database) {
+                Ok(data) => data,
+                Err(e) => {
+                    warn!("Failed to serialize database: {}", e);
+                    return;
+                }
+            };
+            
+            let compressed = match zstd::encode_all(&db_data[..], 3) {
+                Ok(data) => data,
+                Err(e) => {
+                    warn!("Failed to compress database: {}", e);
+                    return;
+                }
+            };
+            
+            let db_path = self.output_dir.join("db.mediaorg");
+            if let Err(e) = std::fs::write(&db_path, compressed) {
+                warn!("Failed to save database: {}", e);
+            } else {
+                debug!("Database saved to {:?}", db_path);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +538,41 @@ mod tests {
         
         let should_skip = detector.check_duplicate(&mut new_info).await.unwrap();
         assert!(!should_skip, "New file should not be skipped");
+    }
+
+    #[tokio::test]
+    async fn test_database_persistence() {
+        let dir = tempdir().unwrap();
+        let output_dir = dir.path().join("output");
+        fs::create_dir_all(&output_dir).await.unwrap();
+        
+        let file1 = dir.path().join("file1.jpg");
+        fs::write(&file1, b"content1").await.unwrap();
+        
+        // First run - compute and save hash
+        {
+            let mut detector = DuplicateDetector::with_database(
+                DuplicateStrategy::Skip, 
+                &output_dir
+            ).await.unwrap();
+            
+            let hash = detector.compute_hash(&file1).await.unwrap();
+            assert!(!hash.is_empty());
+            
+            // Force save
+            detector.save_database().await.unwrap();
+        }
+        
+        // Second run - should load from database
+        {
+            let mut detector = DuplicateDetector::with_database(
+                DuplicateStrategy::Skip, 
+                &output_dir
+            ).await.unwrap();
+            
+            // This should use cached hash
+            let hash = detector.compute_hash(&file1).await.unwrap();
+            assert!(!hash.is_empty());
+        }
     }
 }

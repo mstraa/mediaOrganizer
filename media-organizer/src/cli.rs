@@ -278,6 +278,7 @@ impl std::fmt::Display for DuplicateStrategy {
 }
 
 // Keep backward compatibility by providing an alias
+#[allow(dead_code)]
 pub type Args = OrganizeArgs;
 
 impl OrganizeArgs {

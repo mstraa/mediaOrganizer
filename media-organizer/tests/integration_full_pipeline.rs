@@ -45,11 +45,12 @@ async fn test_full_pipeline_with_duplicates() {
     let result = media_organizer::run_with_args(args).await;
     assert!(result.is_ok(), "Pipeline should complete successfully");
 
-    // Verify files were organized
+    // Verify files were organized (excluding database file)
     let organized_files: Vec<_> = walkdir::WalkDir::new(output_dir.path())
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(|e| !e.file_name().to_str().unwrap().contains("db.mediaorg"))
         .collect();
 
     // Should have 3 files (1 duplicate was skipped)
@@ -115,11 +116,12 @@ async fn test_dry_run_mode() {
     let result = media_organizer::run_with_args(args).await;
     assert!(result.is_ok(), "Dry run should complete successfully");
 
-    // Verify no files were actually moved
+    // Verify no files were actually moved (excluding database file)
     let output_files: Vec<_> = walkdir::WalkDir::new(output_dir.path())
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(|e| !e.file_name().to_str().unwrap().contains("db.mediaorg"))
         .collect();
 
     assert_eq!(
@@ -173,11 +175,12 @@ async fn test_duplicate_rename_strategy() {
     let result = media_organizer::run_with_args(args).await;
     assert!(result.is_ok(), "Pipeline should complete successfully");
 
-    // Verify all files were copied (with renaming)
+    // Verify all files were copied (with renaming) excluding database file
     let output_files: Vec<_> = walkdir::WalkDir::new(output_dir.path())
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(|e| !e.file_name().to_str().unwrap().contains("db.mediaorg"))
         .collect();
 
     assert_eq!(
@@ -231,11 +234,12 @@ async fn test_cross_directory_duplicate_detection() {
     let result = media_organizer::run_with_args(args).await;
     assert!(result.is_ok(), "Pipeline should complete successfully");
 
-    // Count files in output after operation
+    // Count files in output after operation (excluding database file)
     let output_files: Vec<_> = walkdir::WalkDir::new(output_dir.path())
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
+        .filter(|e| !e.file_name().to_str().unwrap().contains("db.mediaorg"))
         .collect();
 
     // Should have 2 files total: existing.jpg + new.jpg (duplicate.jpg was skipped)

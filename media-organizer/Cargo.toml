@@ -29,8 +29,8 @@ walkdir = "2.4"
 # Date and time handling
 chrono = "0.4"
 
-# Fast hashing for duplicate detection
-blake3 = "1.5"
+# Fast hashing for duplicate detection with parallel support
+blake3 = { version = "1.5", features = ["rayon"] }
 
 # Progress bars
 indicatif = "0.17"

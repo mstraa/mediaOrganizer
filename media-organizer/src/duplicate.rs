@@ -5,8 +5,10 @@ use crate::types::FileInfo;
 use anyhow::Result;
 use blake3::Hasher;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
 use tracing::{debug, info, warn};
@@ -26,6 +28,8 @@ pub struct DuplicateDetector {
     output_dir: PathBuf,
     /// Whether database needs saving
     database_modified: bool,
+    /// Number of parallel workers for hashing (None = use all CPU cores)
+    hash_workers: Option<usize>,
 }
 
 impl DuplicateDetector {
@@ -38,6 +42,23 @@ impl DuplicateDetector {
             database: HashDatabase::new(),
             output_dir: PathBuf::new(),
             database_modified: false,
+            hash_workers: None, // Use all CPU cores by default
+        }
+    }
+
+    /// Set the number of parallel workers for hashing
+    pub fn with_hash_workers(mut self, workers: usize) -> Self {
+        self.hash_workers = Some(workers);
+        self
+    }
+
+    /// Configure the rayon thread pool for hashing operations
+    fn configure_thread_pool(&self) {
+        if let Some(workers) = self.hash_workers {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build_global()
+                .ok(); // Ignore error if already configured
         }
     }
 
@@ -55,6 +76,7 @@ impl DuplicateDetector {
             database,
             output_dir: output_dir.to_path_buf(),
             database_modified: false,
+            hash_workers: None,
         })
     }
     
@@ -77,6 +99,7 @@ impl DuplicateDetector {
             database,
             output_dir: output_dir.to_path_buf(),
             database_modified: false,
+            hash_workers: None,
         })
     }
 
@@ -204,28 +227,20 @@ impl DuplicateDetector {
             }
         }
         
-        // Second pass: hash the files that need it
-        for (idx, file_info) in files_to_hash.into_iter().enumerate() {
-            match self.compute_hash(&file_info.path).await {
-                Ok(hash) => {
-                    // Update database
-                    self.database.insert(
-                        file_info.path.clone(),
-                        hash.clone(),
-                        file_info.size,
-                        file_info.modified.timestamp(),
-                    );
-                    self.database_modified = true;
-                    
-                    self.existing_hashes.insert(hash, file_info.path);
-                    new_count += 1;
-                    
-                    if let Some(bar) = &hash_progress {
-                        bar.set_position((idx + 1) as u64);
+        // Second pass: hash the files that need it (in parallel)
+        if !files_to_hash.is_empty() {
+            let progress_arc = hash_progress.as_ref().map(|bar| Arc::new(bar.clone()));
+            let hash_results = self.compute_hashes_parallel(files_to_hash, progress_arc);
+            
+            for (file_info, hash_result) in hash_results {
+                match hash_result {
+                    Ok(hash) => {
+                        self.existing_hashes.insert(hash, file_info.path);
+                        new_count += 1;
                     }
-                }
-                Err(e) => {
-                    warn!("Failed to hash existing file {:?}: {}", file_info.path, e);
+                    Err(e) => {
+                        warn!("Failed to hash existing file {:?}: {}", file_info.path, e);
+                    }
                 }
             }
         }
@@ -255,7 +270,7 @@ impl DuplicateDetector {
         self.scan_output_directory_with_progress(output_dir, file_types, None).await
     }
 
-    /// Compute hash for a file
+    /// Compute hash for a file (async version for single files)
     pub async fn compute_hash(&mut self, path: &Path) -> Result<String> {
         // Check in-memory cache first
         if let Some(hash) = self.hash_cache.get(path) {
@@ -295,6 +310,101 @@ impl DuplicateDetector {
         self.hash_cache.insert(path.to_path_buf(), hash.clone());
 
         Ok(hash)
+    }
+
+    /// Compute hash for a file (sync version for parallel processing)
+    fn compute_hash_sync(path: &Path) -> Result<String> {
+        use std::fs::File;
+        use std::io::{BufReader, Read};
+        
+        debug!("Computing hash for {:?}", path);
+        
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let mut hasher = Hasher::new();
+        
+        // Use larger buffer for better performance
+        let mut buffer = vec![0u8; 256 * 1024]; // 256KB buffer
+        
+        loop {
+            let bytes_read = reader.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+        
+        Ok(hasher.finalize().to_hex().to_string())
+    }
+
+    /// Compute hashes for multiple files in parallel
+    pub fn compute_hashes_parallel(&mut self, files: Vec<FileInfo>, progress_bar: Option<Arc<ProgressBar>>) -> Vec<(FileInfo, Result<String>)> {
+        // Configure thread pool if needed
+        self.configure_thread_pool();
+        
+        // Filter out files already in cache
+        let (cached, to_compute): (Vec<_>, Vec<_>) = files.into_iter()
+            .partition(|file_info| {
+                // Check in-memory cache
+                if self.hash_cache.contains_key(&file_info.path) {
+                    return true;
+                }
+                
+                // Check database cache
+                if let Some(entry) = self.database.get(&file_info.path) {
+                    // Quick check without async metadata
+                    if file_info.size == entry.size {
+                        return true;
+                    }
+                }
+                
+                false
+            });
+        
+        // Get cached results
+        let mut results: Vec<(FileInfo, Result<String>)> = cached.into_iter()
+            .map(|file_info| {
+                let hash = self.hash_cache.get(&file_info.path)
+                    .cloned()
+                    .or_else(|| self.database.get(&file_info.path).map(|e| e.hash.clone()))
+                    .ok_or_else(|| anyhow::anyhow!("Cache miss"));
+                (file_info, hash)
+            })
+            .collect();
+        
+        // Compute remaining hashes in parallel
+        let computed: Vec<(FileInfo, Result<String>)> = to_compute
+            .into_par_iter()
+            .map(|file_info| {
+                let hash_result = Self::compute_hash_sync(&file_info.path);
+                
+                // Update progress bar if provided
+                if let Some(ref bar) = progress_bar {
+                    bar.inc(1);
+                }
+                
+                (file_info, hash_result)
+            })
+            .collect();
+        
+        // Update cache with computed hashes
+        for (file_info, hash_result) in &computed {
+            if let Ok(hash) = hash_result {
+                self.hash_cache.insert(file_info.path.clone(), hash.clone());
+                
+                // Update database
+                self.database.insert(
+                    file_info.path.clone(),
+                    hash.clone(),
+                    file_info.size,
+                    file_info.modified.timestamp(),
+                );
+                self.database_modified = true;
+            }
+        }
+        
+        results.extend(computed);
+        results
     }
 
     /// Check if a file is a duplicate and handle according to strategy

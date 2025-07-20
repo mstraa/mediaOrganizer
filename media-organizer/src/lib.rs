@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod cli;
+pub mod dedup;
 pub mod duplicate;
 pub mod organizer;
 pub mod progress;
@@ -43,7 +44,9 @@ pub async fn run_with_args(args: Args) -> Result<()> {
 
     scanner = scanner
         .with_batch_size(1000)
-        .with_worker_threads(args.get_worker_count());
+        .with_worker_threads(args.get_worker_count())
+        .with_exclude_patterns(args.exclude.clone())
+        .with_follow_links(args.follow_links);
 
     // Start scanning phase
     progress.start_scanning(None);
@@ -83,6 +86,45 @@ pub async fn run_with_args(args: Args) -> Result<()> {
         // Initialize duplicate detector if enabled
         if args.detect_duplicates {
             duplicate_detector = Some(DuplicateDetector::new(args.duplicate_strategy));
+            
+            // Pre-scan output directory for existing files
+            if let Some(detector) = duplicate_detector.as_mut() {
+                info!("Pre-scanning output directory for existing files...");
+                let file_types = args.get_file_types().unwrap_or_else(|| {
+                    // Include all image and video types by default
+                    vec![
+                        crate::types::FileType::Jpeg,
+                        crate::types::FileType::Png,
+                        crate::types::FileType::Heic,
+                        crate::types::FileType::Raw,
+                        crate::types::FileType::Gif,
+                        crate::types::FileType::Bmp,
+                        crate::types::FileType::Tiff,
+                        crate::types::FileType::Webp,
+                        crate::types::FileType::Mp4,
+                        crate::types::FileType::Mov,
+                        crate::types::FileType::Avi,
+                        crate::types::FileType::Mkv,
+                        crate::types::FileType::Webm,
+                        crate::types::FileType::Flv,
+                        crate::types::FileType::Wmv,
+                    ]
+                });
+                
+                match detector.scan_output_directory(&args.output, &file_types).await {
+                    Ok(_) => {
+                        let stats = detector.get_statistics();
+                        if stats.existing_in_output > 0 {
+                            info!("Found {} existing files in output directory", stats.existing_in_output);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error pre-scanning output directory: {}", e);
+                        // Continue anyway - we'll just miss existing duplicates
+                    }
+                }
+            }
+            
             progress.start_duplicate_detection(files.len() as u64);
 
             // Process files through duplicate detector
@@ -120,6 +162,12 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                     "Duplicates found: {} groups with {} total duplicates",
                     stats.duplicate_groups, stats.total_duplicates
                 );
+                if stats.existing_in_output > 0 {
+                    info!(
+                        "Files already in output directory: {} (these were skipped)",
+                        stats.existing_in_output
+                    );
+                }
             }
         } else {
             processed_files = files;

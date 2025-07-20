@@ -27,6 +27,7 @@ pub struct ProgressTracker {
 
     // Timing
     start_time: Instant,
+    #[allow(dead_code)]
     phase_times: Arc<Mutex<HashMap<String, Duration>>>,
 
     // Performance monitoring
@@ -202,6 +203,7 @@ impl ProgressTracker {
     }
 
     /// Report a skipped file
+    #[allow(dead_code)]
     pub fn report_skip(&self, reason: &str) {
         if let Some(ref bar) = self.process_bar {
             bar.println(format!("  ⏭️  Skipped: {reason}"));
@@ -361,6 +363,7 @@ impl ProgressTracker {
     }
 
     /// Record phase timing
+    #[allow(dead_code)]
     pub fn record_phase_time(&self, phase: &str, duration: Duration) {
         if let Ok(mut times) = self.phase_times.lock() {
             times.insert(phase.to_string(), duration);

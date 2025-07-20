@@ -57,6 +57,7 @@ impl Scanner {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_date_range(mut self, start: DateTime<Local>, end: DateTime<Local>) -> Self {
         self.date_range = Some((start, end));
         self
@@ -277,6 +278,7 @@ impl Scanner {
 
 /// Performance metrics for scanning
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct ScanMetrics {
     pub files_discovered: usize,
     pub files_processed: usize,
@@ -287,6 +289,7 @@ pub struct ScanMetrics {
 
 impl Scanner {
     /// Scan with performance metrics
+    #[allow(dead_code)]
     pub async fn scan_with_metrics(&self, tx: mpsc::Sender<FileInfo>) -> Result<ScanMetrics> {
         let start = std::time::Instant::now();
         let mut metrics = ScanMetrics::default();

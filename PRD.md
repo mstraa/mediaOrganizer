@@ -39,6 +39,7 @@ Apple Silicon (M1/M2/M3) macOS systems
 - I want to organize my massive media library by date
 - I want to avoid copying duplicate files
 - I want to separate media files from other file types
+- I want to clean up duplicate files within my existing library
 
 ### As a system administrator
 - I want to process large file archives efficiently
@@ -75,11 +76,12 @@ Apple Silicon (M1/M2/M3) macOS systems
 - Preserve original filenames
 
 #### Duplicate Detection
-- Calculate file hash (SHA-256) for content-based comparison
+- Calculate file hash (BLAKE3) for content-based comparison
 - Maintain efficient in-memory or disk-based duplicate tracking
 - Compare file size + hash for accurate duplicate detection
 - Skip copying if identical file already exists in destination
 - Log duplicate detections for user awareness
+- Support for standalone deduplication within a directory
 
 #### Progress & Logging
 - Display real-time progress (files processed, estimated time remaining)
@@ -89,32 +91,67 @@ Apple Silicon (M1/M2/M3) macOS systems
 
 ### 4.2 CLI Interface
 
+#### Organize Command
 ```bash
 # Basic usage
-media-organizer --input /path/to/source --output /path/to/destination
+media-organizer organize --input /path/to/source --output /path/to/destination
 
 # With options
-media-organizer \
+media-organizer organize \
   --input /path/to/source \
   --output /path/to/destination \
+  --detect-duplicates \
   --dry-run \
   --verbose \
-  --log-file organizer.log \
-  --threads 8
+  --workers 8
 ```
 
-#### Required Arguments
+##### Required Arguments
 - `--input, -i`: Source folder path
 - `--output, -o`: Destination folder path
 
-#### Optional Arguments
+##### Optional Arguments
+- `--detect-duplicates, -d`: Enable duplicate file detection
+- `--duplicate-strategy`: How to handle duplicates (skip, rename, replace)
 - `--dry-run`: Preview operations without copying files
 - `--verbose, -v`: Enable detailed output
-- `--log-file`: Specify log file location
-- `--threads`: Number of parallel processing threads (default: CPU cores)
-- `--skip-duplicates`: Skip duplicate checking (faster but may copy duplicates)
-- `--hash-algorithm`: Choose hash algorithm (sha256, xxhash, blake3)
+- `--quiet, -q`: Suppress non-error output
+- `--workers, -j`: Number of parallel workers (default: CPU cores)
+- `--types, -t`: Comma-separated list of file types to process
+- `--pattern, -p`: Organization pattern (year, year/month, year/month/day)
+- `--mode, -m`: Operation mode (copy or move)
 - `--help, -h`: Display help information
+
+#### Dedup Command (New Feature)
+```bash
+# Basic usage
+media-organizer dedup --directory /path/to/folder
+
+# With options
+media-organizer dedup \
+  --directory /path/to/folder \
+  --dry-run \
+  --verbose \
+  --save-list deleted.txt
+```
+
+##### Required Arguments
+- `--directory, -d`: Directory to scan for duplicates
+
+##### Optional Arguments
+- `--dry-run`: Preview which files would be deleted without making changes
+- `--force, -f`: Skip confirmation prompt before deletion
+- `--save-list`: Save list of deleted files to a file
+- `--types, -t`: Comma-separated list of file types to process
+- `--verbose, -v`: Enable detailed output
+- `--quiet, -q`: Suppress non-error output
+- `--workers, -j`: Number of parallel workers
+- `--help, -h`: Display help information
+
+##### Deduplication Strategy
+- Keeps the oldest file based on creation date (or modification date if creation unavailable)
+- Deletes newer duplicates to free up space
+- Shows space savings before deletion
 
 ## 5. Non-Functional Requirements
 

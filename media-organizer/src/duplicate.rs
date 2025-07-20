@@ -6,13 +6,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Duplicate detector using BLAKE3 hashing
 pub struct DuplicateDetector {
     strategy: DuplicateStrategy,
     hash_cache: HashMap<PathBuf, String>,
     duplicates: HashMap<String, Vec<PathBuf>>,
+    /// Hashes of files that already exist in the output directory
+    existing_hashes: HashMap<String, PathBuf>,
 }
 
 impl DuplicateDetector {
@@ -21,7 +23,53 @@ impl DuplicateDetector {
             strategy,
             hash_cache: HashMap::new(),
             duplicates: HashMap::new(),
+            existing_hashes: HashMap::new(),
         }
+    }
+
+    /// Pre-scan output directory to build hash index of existing files
+    pub async fn scan_output_directory(&mut self, output_dir: &Path, file_types: &[crate::types::FileType]) -> Result<()> {
+        use crate::scanner::Scanner;
+        use tokio::sync::mpsc;
+        
+        info!("Pre-scanning output directory for existing files: {:?}", output_dir);
+        
+        if !output_dir.exists() {
+            debug!("Output directory does not exist yet, skipping pre-scan");
+            return Ok(());
+        }
+        
+        let scanner = Scanner::new(output_dir.to_path_buf())
+            .with_file_types(file_types.to_vec())
+            .with_batch_size(1000);
+        
+        let (tx, mut rx) = mpsc::channel(1000);
+        
+        // Start scanning in background
+        let scan_handle = tokio::spawn(async move {
+            scanner.scan(tx).await
+        });
+        
+        let mut count = 0;
+        while let Some(file_info) = rx.recv().await {
+            match self.compute_hash(&file_info.path).await {
+                Ok(hash) => {
+                    self.existing_hashes.insert(hash, file_info.path);
+                    count += 1;
+                    if count % 100 == 0 {
+                        debug!("Pre-scanned {} existing files", count);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to hash existing file {:?}: {}", file_info.path, e);
+                }
+            }
+        }
+        
+        scan_handle.await??;
+        info!("Pre-scan complete: found {} existing files in output directory", count);
+        
+        Ok(())
     }
 
     /// Compute hash for a file
@@ -58,8 +106,17 @@ impl DuplicateDetector {
         let hash = self.compute_hash(&file_info.path).await?;
         file_info.hash = Some(hash.clone());
 
+        // First check if this file already exists in the output directory
+        if let Some(existing_path) = self.existing_hashes.get(&hash) {
+            info!("File already exists in output directory: {:?} (original: {:?})", 
+                  existing_path, file_info.path);
+            // Always skip files that already exist in output
+            return Ok(true);
+        }
+
+        // Then check for duplicates within the current batch
         if let Some(existing_paths) = self.duplicates.get_mut(&hash) {
-            // This is a duplicate
+            // This is a duplicate within the current batch
             info!("Duplicate found: {:?}", file_info.path);
             existing_paths.push(file_info.path.clone());
 
@@ -69,7 +126,7 @@ impl DuplicateDetector {
                 DuplicateStrategy::Replace => Ok(false), // Will be handled by organizer
             }
         } else {
-            // First occurrence of this file
+            // First occurrence of this file in the current batch
             self.duplicates.insert(hash, vec![file_info.path.clone()]);
             Ok(false)
         }
@@ -127,6 +184,7 @@ impl DuplicateDetector {
         }
 
         stats.unique_files = self.duplicates.len();
+        stats.existing_in_output = self.existing_hashes.len();
         stats
     }
 }
@@ -136,6 +194,7 @@ pub struct DuplicateStatistics {
     pub unique_files: usize,
     pub duplicate_groups: usize,
     pub total_duplicates: usize,
+    pub existing_in_output: usize,
 }
 
 #[cfg(test)]
@@ -155,5 +214,71 @@ mod tests {
 
         // BLAKE3 hash of "Hello, world!"
         assert_eq!(hash.len(), 64); // BLAKE3 produces 32-byte hashes (64 hex chars)
+    }
+
+    #[tokio::test]
+    async fn test_cross_directory_duplicate_detection() {
+        use crate::types::{FileType, MediaMetadata};
+        use chrono::Local;
+        
+        let dir = tempdir().unwrap();
+        let output_dir = dir.path().join("output");
+        let input_dir = dir.path().join("input");
+        
+        fs::create_dir_all(&output_dir).await.unwrap();
+        fs::create_dir_all(&input_dir).await.unwrap();
+        
+        // Create an existing file in output directory
+        let existing_file = output_dir.join("existing.jpg");
+        fs::write(&existing_file, b"existing content").await.unwrap();
+        
+        // Create a duplicate file in input directory
+        let duplicate_file = input_dir.join("duplicate.jpg");
+        fs::write(&duplicate_file, b"existing content").await.unwrap();
+        
+        // Create a new file in input directory
+        let new_file = input_dir.join("new.jpg");
+        fs::write(&new_file, b"new content").await.unwrap();
+        
+        let mut detector = DuplicateDetector::new(DuplicateStrategy::Skip);
+        
+        // Pre-scan output directory - using all image types
+        let image_types = vec![
+            FileType::Jpeg, FileType::Png, FileType::Heic, FileType::Raw,
+            FileType::Gif, FileType::Bmp, FileType::Tiff, FileType::Webp
+        ];
+        detector.scan_output_directory(&output_dir, &image_types).await.unwrap();
+        
+        // Check that existing files are detected
+        let stats = detector.get_statistics();
+        assert_eq!(stats.existing_in_output, 1);
+        
+        // Test duplicate detection
+        let mut duplicate_info = crate::types::FileInfo {
+            path: duplicate_file.clone(),
+            file_type: FileType::Jpeg,
+            size: 16,
+            modified: Local::now(),
+            created: Some(Local::now()),
+            hash: None,
+            metadata: MediaMetadata::default(),
+        };
+        
+        let should_skip = detector.check_duplicate(&mut duplicate_info).await.unwrap();
+        assert!(should_skip, "Duplicate of existing file should be skipped");
+        
+        // Test new file detection
+        let mut new_info = crate::types::FileInfo {
+            path: new_file.clone(),
+            file_type: FileType::Jpeg,
+            size: 11,
+            modified: Local::now(),
+            created: Some(Local::now()),
+            hash: None,
+            metadata: MediaMetadata::default(),
+        };
+        
+        let should_skip = detector.check_duplicate(&mut new_info).await.unwrap();
+        assert!(!should_skip, "New file should not be skipped");
     }
 }

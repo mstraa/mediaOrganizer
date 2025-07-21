@@ -366,6 +366,7 @@ impl ProgressTracker {
         self.errors_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub fn record_error(&self, message: String) {
         self.errors_count.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut errors) = self.error_messages.lock() {
@@ -378,6 +379,7 @@ impl ProgressTracker {
     }
     
     /// Set the update interval for progress bars based on file count
+    #[allow(dead_code)]
     pub fn set_update_interval(&self, interval: Duration) {
         // Apply rate limiting to progress bars to reduce update frequency
         // This helps performance when processing many files
@@ -397,6 +399,7 @@ impl ProgressTracker {
         info!("Progress update interval set to {}ms", rate);
     }
 
+    #[allow(dead_code)]
     pub fn set_space_saved(&self, bytes: u64) {
         self.space_saved.store(bytes, Ordering::Relaxed);
     }

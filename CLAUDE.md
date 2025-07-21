@@ -4,18 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ImagesSorter is a high-performance Rust CLI application for organizing media files on macOS, specifically optimized for Apple Silicon processors. The project aims to process millions of files efficiently while detecting duplicates and organizing them by date.
+MediaOrganizer is a high-performance Rust CLI application for organizing media files on macOS, specifically optimized for Apple Silicon processors. The project aims to process millions of files efficiently while detecting duplicates and organizing them by date.
 
 ## Architecture
 
 ### Core Modules
-- `main.rs` - Async entry point using Tokio runtime
-- `cli.rs` - Command-line interface with clap
+- `main.rs` - Async entry point using Tokio runtime, command handlers
+- `cli.rs` - Command-line interface with clap (organize, dedup, init-db commands)
 - `types.rs` - Core data structures (FileType, FileInfo, etc.)
 - `scanner.rs` - File system scanning logic
 - `duplicate.rs` - BLAKE3-based duplicate detection
 - `organizer.rs` - File organization logic
 - `progress.rs` - Progress tracking with indicatif
+- `database.rs` - Persistent hash database for incremental processing
+- `dedup.rs` - Standalone deduplication functionality
 
 ### Key Design Patterns
 - **Streaming Processing**: Handle millions of files without loading all into memory
@@ -77,14 +79,20 @@ cargo clippy --all-features -- -D warnings
 
 ### Running the Application
 ```bash
-# Run in development
-cargo run -- --input /path/to/source --output /path/to/destination
+# Organize files
+cargo run -- organize -i /path/to/source -o /path/to/destination
+
+# Remove duplicates
+cargo run -- dedup -d /path/to/directory --dry-run
+
+# Initialize/update hash database
+cargo run -- init-db -d /path/to/source -o /path/to/output
 
 # Run with verbose logging
-RUST_LOG=debug cargo run -- -i /source -o /dest --verbose
+RUST_LOG=debug cargo run -- organize -i /source -o /dest --verbose
 
 # Dry run to preview operations
-cargo run -- -i /source -o /dest --dry-run
+cargo run -- organize -i /source -o /dest --dry-run
 ```
 
 ## Performance Targets
@@ -104,11 +112,18 @@ MP4/M4V, MOV, AVI, MKV, WebM, FLV, WMV
 
 ## Current Implementation Status
 
-The project structure is complete but the main logic is still being implemented. Key TODOs are marked in `main.rs`:
-1. Implement file scanning in `scanner.rs`
-2. Complete duplicate detection in `duplicate.rs`
-3. Build organization logic in `organizer.rs`
-4. Wire up progress tracking
+The project is fully functional with three main commands:
+1. `organize` - Organize media files by date/type with optional duplicate detection
+2. `dedup` - Remove duplicate files within a directory (keeps oldest)
+3. `init-db` - Pre-compute or update hash database for faster subsequent runs
+
+### Key Features Implemented
+- Parallel file scanning with configurable workers
+- BLAKE3-based duplicate detection with persistent database
+- Multiple organization patterns (year/month, type, custom)
+- Real-time progress tracking with detailed statistics
+- Dry-run mode for safe operation preview
+- Comprehensive error handling and recovery
 
 ## Development Guidelines
 
@@ -128,3 +143,11 @@ The project structure is complete but the main logic is still being implemented.
 - Integration tests in `tests/` directory
 - Benchmarks in `benches/` for performance-critical code
 - Use `tempfile` crate for test file system operations
+
+### To do every time
+- Update the README.md file with the latest information.
+- Update the CLAUDE.md file with the latest information.
+- Update the Cargo.toml file with the latest information.
+- Update the Cargo.lock file with the latest information.
+- Build and fix any errors and warnings.
+- Don't allow dead code, either remove it or use it.

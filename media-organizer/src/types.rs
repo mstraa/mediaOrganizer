@@ -113,8 +113,11 @@ pub struct MediaMetadata {
     pub date_taken: Option<DateTime<Local>>,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
+    #[allow(dead_code)]
     pub width: Option<u32>,
+    #[allow(dead_code)]
     pub height: Option<u32>,
+    #[allow(dead_code)]
     pub duration: Option<std::time::Duration>,
     #[allow(dead_code)]
     pub location: Option<Location>,

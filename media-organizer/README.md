@@ -45,7 +45,7 @@ The optimized binary will be available at `target/release/media-organizer`.
 
 ## Usage
 
-The media-organizer now has two main commands: `organize` and `dedup`.
+The media-organizer has three main commands: `organize`, `dedup`, and `init-db`.
 
 ### Organize Command
 
@@ -115,6 +115,37 @@ media-organizer dedup -d ~/Pictures -v
 media-organizer dedup -d ~/Documents -e "*.tmp" -e "backup/*"
 ```
 
+### Init-DB Command (New!)
+
+Pre-compute or update the hash database without organizing files. This significantly speeds up subsequent organization runs by caching file hashes.
+
+#### Basic Usage
+```bash
+# Initialize database for a directory
+media-organizer init-db -d /path/to/media -o /path/to/output
+
+# Update existing database (only hashes new/modified files)
+media-organizer init-db -d /path/to/media -o /path/to/output
+
+# Clean up obsolete entries and update database
+media-organizer init-db -d /path/to/media -o /path/to/output --cleanup
+```
+
+#### Advanced Options
+```bash
+# Output statistics in JSON format
+media-organizer init-db -d ~/Photos -o ~/Organized --json
+
+# Process only specific file types
+media-organizer init-db -d ~/Media -o ~/Output -t jpg,png,mp4
+
+# Verbose output to see progress
+media-organizer init-db -d ~/Pictures -o ~/Backup -v
+
+# Set custom number of workers
+media-organizer init-db -d ~/Large -o ~/Storage -j 16 --hash-workers 8
+```
+
 ## Command Line Options
 
 ### Organize Command Options
@@ -146,7 +177,24 @@ media-organizer dedup -d ~/Documents -e "*.tmp" -e "backup/*"
 | `-v, --verbose` | Verbose output | false |
 | `-q, --quiet` | Suppress output | false |
 
-Run `media-organizer organize --help` or `media-organizer dedup --help` for complete options.
+### Init-DB Command Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-d, --directory <DIR>` | Directory to scan | Required |
+| `-o, --output <DIR>` | Output directory for database | Required |
+| `-t, --types <TYPES>` | File types to process | all |
+| `-j, --workers <NUM>` | Parallel workers (0=auto) | 0 |
+| `--hash-workers <NUM>` | Hash computation workers | same as -j |
+| `--cleanup` | Remove obsolete entries | false |
+| `--json` | Output stats in JSON | false |
+| `-v, --verbose` | Verbose output | false |
+| `-e, --exclude <PATTERN>` | Exclude patterns | none |
+| `--min-size <SIZE>` | Minimum file size | 0 |
+| `--max-size <SIZE>` | Maximum file size | unlimited |
+| `--follow-links` | Follow symbolic links | false |
+
+Run `media-organizer <command> --help` for complete options for each command.
 
 ## Configuration File
 

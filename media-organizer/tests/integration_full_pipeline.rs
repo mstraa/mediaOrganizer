@@ -23,6 +23,7 @@ async fn test_full_pipeline_with_duplicates() {
         pattern: "year/month".to_string(),
         mode: OperationMode::Copy,
         workers: 0,
+        hash_workers: None,
         verbose: true,
         quiet: true, // Suppress progress bars in tests
         dry_run: false,
@@ -94,6 +95,7 @@ async fn test_dry_run_mode() {
         pattern: "type".to_string(),
         mode: OperationMode::Move,
         workers: 0,
+        hash_workers: None,
         verbose: false,
         quiet: true,
         dry_run: true, // Dry run mode
@@ -153,6 +155,7 @@ async fn test_duplicate_rename_strategy() {
         pattern: "type".to_string(),
         mode: OperationMode::Copy,
         workers: 0,
+        hash_workers: None,
         verbose: false,
         quiet: true,
         dry_run: false,
@@ -212,6 +215,7 @@ async fn test_cross_directory_duplicate_detection() {
         pattern: "type".to_string(),
         mode: OperationMode::Copy,
         workers: 0,
+        hash_workers: None,
         verbose: true,
         quiet: true,
         dry_run: false,

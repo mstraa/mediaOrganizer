@@ -24,6 +24,8 @@ pub struct ProgressTracker {
     bytes_processed: Arc<AtomicU64>,
     duplicates_found: Arc<AtomicUsize>,
     errors_count: Arc<AtomicUsize>,
+    space_saved: Arc<AtomicU64>,
+    error_messages: Arc<Mutex<Vec<String>>>,
 
     // Timing
     start_time: Instant,
@@ -88,6 +90,8 @@ impl ProgressTracker {
             bytes_processed: Arc::new(AtomicU64::new(0)),
             duplicates_found: Arc::new(AtomicUsize::new(0)),
             errors_count: Arc::new(AtomicUsize::new(0)),
+            space_saved: Arc::new(AtomicU64::new(0)),
+            error_messages: Arc::new(Mutex::new(Vec::new())),
             start_time: Instant::now(),
             phase_times: Arc::new(Mutex::new(HashMap::new())),
             metrics_handle: None,
@@ -362,6 +366,41 @@ impl ProgressTracker {
         self.errors_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_error(&self, message: String) {
+        self.errors_count.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut errors) = self.error_messages.lock() {
+            // Keep only the last 100 errors to avoid unbounded memory growth
+            if errors.len() >= 100 {
+                errors.remove(0);
+            }
+            errors.push(message);
+        }
+    }
+    
+    /// Set the update interval for progress bars based on file count
+    pub fn set_update_interval(&self, interval: Duration) {
+        // Apply rate limiting to progress bars to reduce update frequency
+        // This helps performance when processing many files
+        let rate = interval.as_millis() as u64;
+        
+        if let Some(ref bar) = self.scan_bar {
+            bar.enable_steady_tick(interval);
+        }
+        if let Some(ref bar) = self.duplicate_bar {
+            bar.enable_steady_tick(interval);
+        }
+        if let Some(ref bar) = self.process_bar {
+            bar.enable_steady_tick(interval);
+        }
+        self.main_bar.enable_steady_tick(interval);
+        
+        info!("Progress update interval set to {}ms", rate);
+    }
+
+    pub fn set_space_saved(&self, bytes: u64) {
+        self.space_saved.store(bytes, Ordering::Relaxed);
+    }
+
     /// Record phase timing
     #[allow(dead_code)]
     pub fn record_phase_time(&self, phase: &str, duration: Duration) {
@@ -401,8 +440,8 @@ impl ProgressTracker {
             processed_files: files_organized,
             total_size: self.bytes_processed.load(Ordering::Relaxed),
             duplicates_found: self.duplicates_found.load(Ordering::Relaxed),
-            space_saved: 0, // TODO: Calculate from duplicate sizes
-            errors: vec![], // TODO: Collect actual error messages
+            space_saved: self.space_saved.load(Ordering::Relaxed),
+            errors: self.error_messages.lock().unwrap_or_else(|_| panic!("Error messages lock poisoned")).clone(),
             performance_metrics: PerformanceMetrics {
                 scan_rate,
                 hash_rate,

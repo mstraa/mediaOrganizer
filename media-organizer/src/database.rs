@@ -79,7 +79,7 @@ impl HashDatabase {
     /// Save database to output directory
     pub async fn save(&self, output_dir: &Path) -> Result<()> {
         let db_path = output_dir.join(DB_FILENAME);
-        let temp_path = output_dir.join(format!("{}.tmp", DB_FILENAME));
+        let temp_path = output_dir.join(format!("{DB_FILENAME}.tmp"));
         
         info!("Saving hash database to {:?}", db_path);
         
@@ -128,7 +128,7 @@ impl HashDatabase {
         // Update hash index
         self.hash_index
             .entry(hash)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(path);
     }
 

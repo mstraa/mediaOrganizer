@@ -75,7 +75,6 @@ async fn main() -> Result<()> {
 
             info!("Starting Database Initialization");
             info!("Directory: {}", args.directory.display());
-            info!("Output: {}", args.output.display());
             info!("Workers: {}", args.get_worker_count());
 
             match run_init_db(args).await {
@@ -367,7 +366,7 @@ async fn run_init_db(args: InitDbArgs) -> Result<()> {
     let mut progress = ProgressTracker::new(false);
 
     // Load existing database if present
-    let mut db = HashDatabase::load(&args.output).await?;
+    let mut db = HashDatabase::load(&args.directory).await?;
     
     if args.cleanup {
         info!("Cleaning up obsolete entries from database...");
@@ -486,8 +485,8 @@ async fn run_init_db(args: InitDbArgs) -> Result<()> {
         progress.finish_duplicate_detection();
 
         // Save the database
-        info!("Saving database to {:?}", args.output);
-        db.save(&args.output).await?;
+        info!("Saving database to {:?}", args.directory);
+        db.save(&args.directory).await?;
 
         // Report statistics
         let stats = db.stats();

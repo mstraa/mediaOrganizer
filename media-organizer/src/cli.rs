@@ -266,13 +266,9 @@ pub struct DedupArgs {
 /// Arguments for the init-db command
 #[derive(Parser, Debug)]
 pub struct InitDbArgs {
-    /// Directory to scan for creating the hash database
+    /// Directory to scan and where the hash database will be created
     #[arg(short, long, value_name = "DIR")]
     pub directory: PathBuf,
-    
-    /// Output directory where the database will be saved
-    #[arg(short, long, value_name = "DIR")]
-    pub output: PathBuf,
 
     /// File types to process (default: all supported types)
     #[arg(
@@ -593,14 +589,6 @@ impl InitDbArgs {
             anyhow::bail!("Path is not a directory: {}", self.directory.display());
         }
 
-        // Check if output directory exists (we'll create the database file there)
-        if !self.output.exists() {
-            anyhow::bail!("Output directory does not exist: {}", self.output.display());
-        }
-
-        if !self.output.is_dir() {
-            anyhow::bail!("Output path is not a directory: {}", self.output.display());
-        }
 
         // Validate file size constraints
         if let Some(max_size) = self.max_size {

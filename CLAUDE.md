@@ -86,7 +86,7 @@ cargo run -- organize -i /path/to/source -o /path/to/destination
 cargo run -- dedup -d /path/to/directory --dry-run
 
 # Initialize/update hash database
-cargo run -- init-db -d /path/to/source -o /path/to/output
+cargo run -- init-db -d /path/to/folder
 
 # Run with verbose logging
 RUST_LOG=debug cargo run -- organize -i /source -o /dest --verbose

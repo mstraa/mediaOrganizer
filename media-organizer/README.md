@@ -117,33 +117,33 @@ media-organizer dedup -d ~/Documents -e "*.tmp" -e "backup/*"
 
 ### Init-DB Command (New!)
 
-Pre-compute or update the hash database without organizing files. This significantly speeds up subsequent organization runs by caching file hashes.
+Pre-compute or update the hash database without organizing files. This significantly speeds up subsequent organization runs by caching file hashes. The database (db.mediaorg) is created in the scanned directory.
 
 #### Basic Usage
 ```bash
 # Initialize database for a directory
-media-organizer init-db -d /path/to/media -o /path/to/output
+media-organizer init-db -d /path/to/media
 
 # Update existing database (only hashes new/modified files)
-media-organizer init-db -d /path/to/media -o /path/to/output
+media-organizer init-db -d /path/to/media
 
 # Clean up obsolete entries and update database
-media-organizer init-db -d /path/to/media -o /path/to/output --cleanup
+media-organizer init-db -d /path/to/media --cleanup
 ```
 
 #### Advanced Options
 ```bash
 # Output statistics in JSON format
-media-organizer init-db -d ~/Photos -o ~/Organized --json
+media-organizer init-db -d ~/Photos --json
 
 # Process only specific file types
-media-organizer init-db -d ~/Media -o ~/Output -t jpg,png,mp4
+media-organizer init-db -d ~/Media -t jpg,png,mp4
 
 # Verbose output to see progress
-media-organizer init-db -d ~/Pictures -o ~/Backup -v
+media-organizer init-db -d ~/Pictures -v
 
 # Set custom number of workers
-media-organizer init-db -d ~/Large -o ~/Storage -j 16 --hash-workers 8
+media-organizer init-db -d ~/Large -j 16 --hash-workers 8
 ```
 
 ## Command Line Options
@@ -181,8 +181,7 @@ media-organizer init-db -d ~/Large -o ~/Storage -j 16 --hash-workers 8
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-d, --directory <DIR>` | Directory to scan | Required |
-| `-o, --output <DIR>` | Output directory for database | Required |
+| `-d, --directory <DIR>` | Directory to scan and store database | Required |
 | `-t, --types <TYPES>` | File types to process | all |
 | `-j, --workers <NUM>` | Parallel workers (0=auto) | 0 |
 | `--hash-workers <NUM>` | Hash computation workers | same as -j |

@@ -161,20 +161,18 @@ media-organizer dedup \
 #### Init-DB Command (New Feature)
 ```bash
 # Basic usage
-media-organizer init-db --directory /path/to/folder --output /path/to/output
+media-organizer init-db --directory /path/to/folder
 
 # With options
 media-organizer init-db \
   --directory /path/to/folder \
-  --output /path/to/output \
   --cleanup \
   --json \
   --verbose
 ```
 
 ##### Required Arguments
-- `--directory, -d`: Directory to scan for creating the hash database
-- `--output, -o`: Output directory where the database will be saved
+- `--directory, -d`: Directory to scan and where the hash database will be created
 
 ##### Optional Arguments
 - `--types, -t`: Comma-separated list of file types to process

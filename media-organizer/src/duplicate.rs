@@ -66,6 +66,7 @@ impl DuplicateDetector {
     }
 
     /// Initialize with database from output directory
+    #[allow(dead_code)]
     pub async fn with_database(strategy: DuplicateStrategy, output_dir: &Path) -> Result<Self> {
         info!("Loading hash database from output directory");
         
@@ -85,6 +86,7 @@ impl DuplicateDetector {
     }
     
     /// Initialize with database from output directory, with progress tracking
+    #[allow(dead_code)]
     pub async fn with_database_and_progress(strategy: DuplicateStrategy, output_dir: &Path, progress: &ProgressTracker) -> Result<Self> {
         info!("Loading hash database from output directory");
         

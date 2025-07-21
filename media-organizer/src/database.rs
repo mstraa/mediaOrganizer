@@ -138,11 +138,13 @@ impl HashDatabase {
     }
 
     /// Check if a hash exists in the database
+    #[allow(dead_code)]
     pub fn contains_hash(&self, hash: &str) -> bool {
         self.hash_index.contains_key(hash)
     }
 
     /// Get all paths with a given hash
+    #[allow(dead_code)]
     pub fn get_paths_by_hash(&self, hash: &str) -> Option<&Vec<PathBuf>> {
         self.hash_index.get(hash)
     }

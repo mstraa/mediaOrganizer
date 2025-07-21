@@ -11,7 +11,7 @@ mod progress;
 mod scanner;
 mod types;
 
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, InitDbArgs};
 use progress::setup_logging;
 
 #[tokio::main]
@@ -62,6 +62,29 @@ async fn main() -> Result<()> {
                 },
                 Err(e) => {
                     error!("Error during deduplication: {}", e);
+                    Err(e)
+                },
+            }
+        },
+        Commands::InitDb(args) => {
+            // Initialize logging based on verbose flag
+            setup_logging(args.verbose);
+
+            // Validate arguments
+            args.validate()?;
+
+            info!("Starting Database Initialization");
+            info!("Directory: {}", args.directory.display());
+            info!("Output: {}", args.output.display());
+            info!("Workers: {}", args.get_worker_count());
+
+            match run_init_db(args).await {
+                Ok(()) => {
+                    info!("Database initialization completed successfully");
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Error during database initialization: {}", e);
                     Err(e)
                 },
             }
@@ -327,6 +350,170 @@ async fn run_organize(args: cli::OrganizeArgs) -> Result<()> {
 
     if args.dry_run {
         info!("Dry run complete - no files were actually moved or copied");
+    }
+
+    Ok(())
+}
+
+async fn run_init_db(args: InitDbArgs) -> Result<()> {
+    use crate::database::HashDatabase;
+    use crate::duplicate::DuplicateDetector;
+    use crate::progress::ProgressTracker;
+    use crate::scanner::Scanner;
+    use serde_json;
+    use tokio::sync::mpsc;
+
+    // Initialize progress tracker
+    let mut progress = ProgressTracker::new(false);
+
+    // Load existing database if present
+    let mut db = HashDatabase::load(&args.output).await?;
+    
+    if args.cleanup {
+        info!("Cleaning up obsolete entries from database...");
+        let removed = db.cleanup().await?;
+        info!("Removed {} obsolete entries", removed);
+    }
+
+    // Create scanner
+    let mut scanner = Scanner::new(args.directory.clone());
+
+    // Configure scanner based on arguments
+    if let Some(file_types) = args.get_file_types() {
+        scanner = scanner.with_file_types(file_types);
+    }
+
+    if let Some((min, max)) = args.get_size_limits() {
+        scanner = scanner.with_size_limits(min, max);
+    }
+
+    scanner = scanner
+        .with_batch_size(1000)
+        .with_worker_threads(args.get_worker_count())
+        .with_exclude_patterns(args.exclude.clone())
+        .with_follow_links(args.follow_links);
+
+    // Start scanning phase
+    progress.start_scanning(None);
+    progress.enable_steady_tick();
+
+    // Create channel for streaming files
+    let (tx, mut rx) = mpsc::channel(1000);
+
+    // Start scanning in background
+    let scan_handle = tokio::spawn(async move { scanner.scan(tx).await });
+
+    // Collect files as they're discovered
+    let mut files = Vec::new();
+    let mut file_count = 0;
+
+    while let Some(file_info) = rx.recv().await {
+        file_count += 1;
+        progress.update_scan(file_count);
+        progress.increment_files_scanned(1);
+        progress.add_bytes_processed(file_info.size);
+
+        if args.verbose {
+            info!("Found: {:?} ({} bytes)", file_info.path, file_info.size);
+        }
+
+        files.push(file_info);
+    }
+
+    // Wait for scanning to complete
+    scan_handle.await??;
+    progress.finish_scanning(file_count);
+
+    // Process files for hashing
+    if !files.is_empty() {
+        progress.start_duplicate_detection(files.len() as u64);
+
+        // Create a duplicate detector just for hashing
+        let hash_workers = args.hash_workers.unwrap_or_else(|| args.get_worker_count());
+        let mut detector = DuplicateDetector::new(crate::cli::DuplicateStrategy::Skip)
+            .with_hash_workers(hash_workers);
+
+        let mut new_hashes = 0;
+        let mut updated_hashes = 0;
+
+        // Process each file
+        for (idx, file_info) in files.into_iter().enumerate() {
+            progress.update_duplicate_detection(idx as u64 + 1);
+
+            // Check if we already have a hash for this file
+            let needs_update = if let Some(existing) = db.get(&file_info.path) {
+                // Check if file has been modified
+                let file_modified = file_info.modified.timestamp();
+                existing.modified != file_modified || existing.size != file_info.size
+            } else {
+                true
+            };
+
+            if needs_update {
+                // Compute hash
+                match detector.compute_hash(&file_info.path).await {
+                    Ok(hash_value) => {
+                            // Check if this is an update or new entry
+                            if db.get(&file_info.path).is_some() {
+                                updated_hashes += 1;
+                            } else {
+                                new_hashes += 1;
+                            }
+                            
+                            // Insert into database
+                            db.insert(
+                                file_info.path.clone(),
+                                hash_value,
+                                file_info.size,
+                                file_info.modified.timestamp(),
+                            );
+                            
+                            progress.increment_files_hashed(1);
+                    }
+                    Err(e) => {
+                        error!("Error computing hash for {:?}: {}", file_info.path, e);
+                        progress.increment_errors();
+                    }
+                }
+            } else {
+                // File hasn't changed, skip it
+                if args.verbose {
+                    info!("Skipping unchanged file: {:?}", file_info.path);
+                }
+            }
+        }
+
+        progress.finish_duplicate_detection();
+
+        // Save the database
+        info!("Saving database to {:?}", args.output);
+        db.save(&args.output).await?;
+
+        // Report statistics
+        let stats = db.stats();
+        info!("Database statistics:");
+        info!("  Total files: {}", stats.total_files);
+        info!("  Unique hashes: {}", stats.unique_hashes);
+        info!("  Duplicate groups: {}", stats.duplicate_groups);
+        info!("  Total duplicates: {}", stats.total_duplicates);
+        info!("  New hashes added: {}", new_hashes);
+        info!("  Existing hashes updated: {}", updated_hashes);
+
+        if args.json {
+            let json_stats = serde_json::json!({
+                "total_files": stats.total_files,
+                "unique_hashes": stats.unique_hashes,
+                "duplicate_groups": stats.duplicate_groups,
+                "total_duplicates": stats.total_duplicates,
+                "new_hashes": new_hashes,
+                "updated_hashes": updated_hashes,
+            });
+            println!("{}", serde_json::to_string_pretty(&json_stats)?);
+        }
+
+        progress.print_summary();
+    } else {
+        progress.finish("No media files found");
     }
 
     Ok(())

@@ -22,6 +22,9 @@ pub enum Commands {
     
     /// Remove duplicate files within a directory
     Dedup(DedupArgs),
+    
+    /// Initialize or update the hash database only
+    InitDb(InitDbArgs),
 }
 
 /// Arguments for the organize command
@@ -260,6 +263,84 @@ pub struct DedupArgs {
     pub save_list: Option<PathBuf>,
 }
 
+/// Arguments for the init-db command
+#[derive(Parser, Debug)]
+pub struct InitDbArgs {
+    /// Directory to scan for creating the hash database
+    #[arg(short, long, value_name = "DIR")]
+    pub directory: PathBuf,
+    
+    /// Output directory where the database will be saved
+    #[arg(short, long, value_name = "DIR")]
+    pub output: PathBuf,
+
+    /// File types to process (default: all supported types)
+    #[arg(
+        short = 't',
+        long,
+        value_name = "TYPES",
+        value_delimiter = ',',
+        help = "Comma-separated list of file types: jpg,png,mp4,mov,heic,raw"
+    )]
+    pub types: Option<Vec<String>>,
+    
+    /// Number of parallel workers
+    #[arg(
+        short = 'j',
+        long,
+        value_name = "NUM",
+        default_value = "0",
+        help = "Number of parallel workers (0 = auto-detect)"
+    )]
+    pub workers: usize,
+    
+    /// Number of parallel workers for hash computation
+    #[arg(
+        long,
+        value_name = "NUM",
+        help = "Number of parallel workers for hash computation (defaults to the value of --workers if not specified)"
+    )]
+    pub hash_workers: Option<usize>,
+
+    /// Verbose output
+    #[arg(short, long, help = "Enable verbose output")]
+    pub verbose: bool,
+
+    /// Exclude patterns
+    #[arg(
+        short = 'e',
+        long,
+        value_name = "PATTERN",
+        help = "Patterns to exclude (can be specified multiple times)"
+    )]
+    pub exclude: Vec<String>,
+
+    /// Minimum file size to process (in bytes)
+    #[arg(
+        long,
+        value_name = "SIZE",
+        default_value = "0",
+        help = "Minimum file size to process"
+    )]
+    pub min_size: u64,
+
+    /// Maximum file size to process (in bytes)
+    #[arg(long, value_name = "SIZE", help = "Maximum file size to process")]
+    pub max_size: Option<u64>,
+
+    /// Follow symbolic links
+    #[arg(long, help = "Follow symbolic links")]
+    pub follow_links: bool,
+    
+    /// Clean up obsolete entries from existing database
+    #[arg(long, help = "Clean up entries for files that no longer exist")]
+    pub cleanup: bool,
+
+    /// Output database statistics in JSON format
+    #[arg(long, help = "Output database statistics in JSON format")]
+    pub json: bool,
+}
+
 // Keep the existing enums
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OperationMode {
@@ -434,6 +515,91 @@ impl DedupArgs {
         // Check for conflicting flags
         if self.verbose && self.quiet {
             anyhow::bail!("Cannot use both --verbose and --quiet flags");
+        }
+
+        // Validate file size constraints
+        if let Some(max_size) = self.max_size {
+            if max_size <= self.min_size {
+                anyhow::bail!("Maximum file size must be greater than minimum file size");
+            }
+        }
+
+        // Validate worker count
+        if self.workers > 1000 {
+            anyhow::bail!("Worker count too high: {}", self.workers);
+        }
+
+        Ok(())
+    }
+
+    /// Get the effective number of workers (0 means auto-detect)
+    pub fn get_worker_count(&self) -> usize {
+        if self.workers == 0 {
+            // Auto-detect based on CPU cores
+            num_cpus::get()
+        } else {
+            self.workers
+        }
+    }
+
+    /// Get file types filter if specified
+    pub fn get_file_types(&self) -> Option<Vec<crate::types::FileType>> {
+        use crate::types::FileType;
+
+        self.types.as_ref().map(|types| {
+            types
+                .iter()
+                .filter_map(|t| match t.to_lowercase().as_str() {
+                    "jpg" | "jpeg" => Some(FileType::Jpeg),
+                    "png" => Some(FileType::Png),
+                    "heic" | "heif" => Some(FileType::Heic),
+                    "raw" | "cr2" | "nef" | "arw" | "dng" => Some(FileType::Raw),
+                    "gif" => Some(FileType::Gif),
+                    "bmp" => Some(FileType::Bmp),
+                    "tiff" | "tif" => Some(FileType::Tiff),
+                    "webp" => Some(FileType::Webp),
+                    "mp4" | "m4v" => Some(FileType::Mp4),
+                    "mov" => Some(FileType::Mov),
+                    "avi" => Some(FileType::Avi),
+                    "mkv" => Some(FileType::Mkv),
+                    "webm" => Some(FileType::Webm),
+                    "flv" => Some(FileType::Flv),
+                    "wmv" => Some(FileType::Wmv),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// Get size limits as a tuple
+    pub fn get_size_limits(&self) -> Option<(u64, Option<u64>)> {
+        if self.min_size > 0 || self.max_size.is_some() {
+            Some((self.min_size, self.max_size))
+        } else {
+            None
+        }
+    }
+}
+
+impl InitDbArgs {
+    /// Validate init-db command arguments
+    pub fn validate(&self) -> anyhow::Result<()> {
+        // Check if directory exists
+        if !self.directory.exists() {
+            anyhow::bail!("Directory does not exist: {}", self.directory.display());
+        }
+
+        if !self.directory.is_dir() {
+            anyhow::bail!("Path is not a directory: {}", self.directory.display());
+        }
+
+        // Check if output directory exists (we'll create the database file there)
+        if !self.output.exists() {
+            anyhow::bail!("Output directory does not exist: {}", self.output.display());
+        }
+
+        if !self.output.is_dir() {
+            anyhow::bail!("Output path is not a directory: {}", self.output.display());
         }
 
         // Validate file size constraints

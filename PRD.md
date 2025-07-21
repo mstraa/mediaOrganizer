@@ -158,6 +158,44 @@ media-organizer dedup \
 - Deletes newer duplicates to free up space
 - Shows space savings before deletion
 
+#### Init-DB Command (New Feature)
+```bash
+# Basic usage
+media-organizer init-db --directory /path/to/folder --output /path/to/output
+
+# With options
+media-organizer init-db \
+  --directory /path/to/folder \
+  --output /path/to/output \
+  --cleanup \
+  --json \
+  --verbose
+```
+
+##### Required Arguments
+- `--directory, -d`: Directory to scan for creating the hash database
+- `--output, -o`: Output directory where the database will be saved
+
+##### Optional Arguments
+- `--types, -t`: Comma-separated list of file types to process
+- `--workers, -j`: Number of parallel workers (default: CPU cores)
+- `--hash-workers`: Number of parallel workers for hash computation
+- `--cleanup`: Clean up entries for files that no longer exist
+- `--json`: Output database statistics in JSON format
+- `--verbose, -v`: Enable detailed output
+- `--exclude, -e`: Patterns to exclude (can be specified multiple times)
+- `--min-size`: Minimum file size to process
+- `--max-size`: Maximum file size to process
+- `--follow-links`: Follow symbolic links
+- `--help, -h`: Display help information
+
+##### Database Initialization Benefits
+- Pre-compute hashes without organizing files
+- Update existing database incrementally
+- Clean up obsolete entries from moved/deleted files
+- Export statistics for planning and analysis
+- Significantly faster subsequent organization runs
+
 ## 5. Non-Functional Requirements
 
 ### 5.1 Performance Requirements

@@ -315,7 +315,7 @@ async fn run_organize(args: cli::OrganizeArgs) -> Result<()> {
             if args.json {
                 let report = progress.generate_report();
                 if let Ok(json) = progress::report_as_json(&report) {
-                    println!("\n{}", json);
+                    println!("\n{json}");
                 }
             }
         } else {

@@ -131,7 +131,7 @@ impl Deduplicator {
                 Ok(hash) => {
                     file_info.hash = Some(hash.clone());
                     self.progress.increment_files_hashed(1);
-                    hash_groups.entry(hash).or_insert_with(Vec::new).push(file_info);
+                    hash_groups.entry(hash).or_default().push(file_info);
                 }
                 Err(e) => {
                     error!("Failed to hash {:?}: {}", file_info.path, e);
@@ -205,8 +205,8 @@ impl Deduplicator {
 
         println!("\n📊 Duplicate Detection Summary:");
         println!("================================");
-        println!("Duplicate groups found: {}", total_groups);
-        println!("Total duplicate files: {}", total_duplicates);
+        println!("Duplicate groups found: {total_groups}");
+        println!("Total duplicate files: {total_duplicates}");
         println!("Space that can be freed: {}", format_size(total_space_savings));
 
         if self.args.verbose || self.args.dry_run {
@@ -318,7 +318,7 @@ impl Deduplicator {
         if self.args.json {
             let report = self.progress.generate_report();
             if let Ok(json) = crate::progress::report_as_json(&report) {
-                println!("\n{}", json);
+                println!("\n{json}");
             }
         }
 

@@ -30,6 +30,8 @@ pub struct DuplicateDetector {
     database_modified: bool,
     /// Number of parallel workers for hashing (None = use all CPU cores)
     hash_workers: Option<usize>,
+    /// Space saved by skipping duplicates (in bytes)
+    space_saved: u64,
 }
 
 impl DuplicateDetector {
@@ -43,6 +45,7 @@ impl DuplicateDetector {
             output_dir: PathBuf::new(),
             database_modified: false,
             hash_workers: None, // Use all CPU cores by default
+            space_saved: 0,
         }
     }
 
@@ -77,6 +80,7 @@ impl DuplicateDetector {
             output_dir: output_dir.to_path_buf(),
             database_modified: false,
             hash_workers: None,
+            space_saved: 0,
         })
     }
     
@@ -100,6 +104,7 @@ impl DuplicateDetector {
             output_dir: output_dir.to_path_buf(),
             database_modified: false,
             hash_workers: None,
+            space_saved: 0,
         })
     }
 
@@ -128,7 +133,7 @@ impl DuplicateDetector {
                 if removed > 0 {
                     self.database_modified = true;
                     if let Some(p) = progress {
-                        p.report_success(&format!("Cleaned up {} obsolete entries", removed));
+                        p.report_success(&format!("Cleaned up {removed} obsolete entries"));
                     }
                 }
                 
@@ -246,7 +251,7 @@ impl DuplicateDetector {
         }
         
         if let Some(bar) = hash_progress {
-            bar.finish_with_message(format!("Pre-scan complete: {} files processed, {} new/modified files hashed", count, new_count));
+            bar.finish_with_message(format!("Pre-scan complete: {count} files processed, {new_count} new/modified files hashed"));
         }
         
         info!("Pre-scan complete: {} files processed, {} new/modified files hashed", count, new_count);
@@ -426,6 +431,7 @@ impl DuplicateDetector {
             info!("File already exists in output directory: {:?} (original: {:?})", 
                   existing_path, file_info.path);
             // Always skip files that already exist in output
+            self.space_saved += file_info.size;
             return Ok(true);
         }
 
@@ -436,7 +442,10 @@ impl DuplicateDetector {
             existing_paths.push(file_info.path.clone());
 
             match self.strategy {
-                DuplicateStrategy::Skip => Ok(true),
+                DuplicateStrategy::Skip => {
+                    self.space_saved += file_info.size;
+                    Ok(true)
+                },
                 DuplicateStrategy::Rename => Ok(false), // Will be handled by organizer
                 DuplicateStrategy::Replace => Ok(false), // Will be handled by organizer
             }
@@ -513,6 +522,7 @@ impl DuplicateDetector {
         let db_stats = self.database.stats();
         stats.database_entries = db_stats.total_files;
         stats.database_duplicates = db_stats.total_duplicates;
+        stats.space_saved = self.space_saved;
         
         stats
     }
@@ -526,6 +536,7 @@ pub struct DuplicateStatistics {
     pub existing_in_output: usize,
     pub database_entries: usize,
     pub database_duplicates: usize,
+    pub space_saved: u64,  // Bytes saved by skipping duplicates
 }
 
 // Implement Drop to save database when detector is dropped

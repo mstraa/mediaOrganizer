@@ -1,6 +1,6 @@
 use crate::types::{FileInfo, FileType, MediaMetadata};
 use anyhow::Result;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeZone};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -256,20 +256,36 @@ impl Scanner {
     }
 
     /// Extract media-specific metadata
-    fn extract_metadata(&self, _path: &Path, file_type: &FileType) -> MediaMetadata {
-        // TODO: Implement actual metadata extraction
-        // For images: use kamadak-exif or similar
-        // For videos: use ffmpeg bindings or similar
+    fn extract_metadata(&self, path: &Path, file_type: &FileType) -> MediaMetadata {
         let mut metadata = MediaMetadata::default();
 
-        // Placeholder implementation
+        // For now, we'll use the file's modification time as the date taken
+        // This is a reasonable fallback when EXIF data is not available
+        if let Ok(file_metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = file_metadata.modified() {
+                if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    let datetime = chrono::Local.timestamp_opt(duration.as_secs() as i64, 0).single();
+                    metadata.date_taken = datetime;
+                }
+            }
+        }
+
+        // Basic metadata based on file type
+        // In a production implementation, we would:
+        // - Use kamadak-exif or similar for image EXIF data
+        // - Use ffmpeg bindings for video metadata
+        // - Extract actual dimensions, camera info, etc.
         if file_type.is_image() {
-            // Would extract EXIF data here
-            metadata.width = Some(1920);
-            metadata.height = Some(1080);
+            // Placeholder values - would be extracted from actual image
+            // metadata.width = Some(extracted_width);
+            // metadata.height = Some(extracted_height);
+            // metadata.camera_make = Some(extracted_make);
+            // metadata.camera_model = Some(extracted_model);
         } else if file_type.is_video() {
-            // Would extract video metadata here
-            metadata.duration = Some(std::time::Duration::from_secs(60));
+            // Placeholder values - would be extracted from actual video
+            // metadata.duration = Some(extracted_duration);
+            // metadata.width = Some(extracted_width);
+            // metadata.height = Some(extracted_height);
         }
 
         metadata

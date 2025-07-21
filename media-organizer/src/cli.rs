@@ -101,7 +101,7 @@ pub struct OrganizeArgs {
     #[arg(
         long,
         value_name = "NUM",
-        help = "Number of parallel workers for hash computation (defaults to workers value)"
+        help = "Number of parallel workers for hash computation (defaults to the value of --workers if not specified)"
     )]
     pub hash_workers: Option<usize>,
 
@@ -209,7 +209,7 @@ pub struct DedupArgs {
     #[arg(
         long,
         value_name = "NUM",
-        help = "Number of parallel workers for hash computation (defaults to workers value)"
+        help = "Number of parallel workers for hash computation (defaults to the value of --workers if not specified)"
     )]
     pub hash_workers: Option<usize>,
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod cli;
 pub mod database;
 pub mod dedup;
@@ -125,7 +123,9 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                         }
                     }
                     Err(e) => {
-                        error!("Error pre-scanning output directory: {}", e);
+                        let error_msg = format!("Error pre-scanning output directory: {e}");
+                        error!("{}", error_msg);
+                        progress.record_error(error_msg);
                         // Continue anyway - we'll just miss existing duplicates
                     }
                 }
@@ -150,7 +150,9 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                             }
                         },
                         Err(e) => {
-                            error!("Error checking duplicate for {:?}: {}", file_info.path, e);
+                            let error_msg = format!("Error checking duplicate for {:?}: {}", file_info.path, e);
+                            error!("{}", error_msg);
+                            progress.record_error(error_msg);
                             processed_files.push(file_info); // Process anyway
                         },
                     }
@@ -174,6 +176,8 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                         stats.existing_in_output
                     );
                 }
+                // Update progress tracker with space saved
+                progress.set_space_saved(stats.space_saved);
             }
         } else {
             processed_files = files;
@@ -227,14 +231,18 @@ pub async fn run_with_args(args: Args) -> Result<()> {
                         } else {
                             error_count += 1;
                             if let Some(error) = &result.error {
-                                error!("Failed to organize {:?}: {}", result.source, error);
+                                let error_msg = format!("Failed to organize {:?}: {}", result.source, error);
+                                error!("{}", error_msg);
+                                progress.record_error(error_msg);
                             }
                         }
                         operations.push(result);
                     },
                     Err(e) => {
                         error_count += 1;
-                        error!("Error organizing {:?}: {}", file_info.path, e);
+                        let error_msg = format!("Error organizing {:?}: {}", file_info.path, e);
+                        error!("{}", error_msg);
+                        progress.record_error(error_msg);
                     },
                 }
             }

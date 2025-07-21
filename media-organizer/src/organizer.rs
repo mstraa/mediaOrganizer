@@ -176,12 +176,29 @@ impl Organizer {
     }
 
     /// Preserve timestamps from source to destination
-    async fn preserve_timestamps_for(&self, source: &Path, _dest: &Path) -> Result<()> {
-        let _metadata = fs::metadata(source).await?;
-
-        // This would require platform-specific code to properly set timestamps
-        // For now, this is a placeholder
-        // TODO: Implement proper timestamp preservation using platform-specific APIs
+    async fn preserve_timestamps_for(&self, source: &Path, dest: &Path) -> Result<()> {
+        let metadata = fs::metadata(source).await?;
+        
+        // Get the modified and accessed times from the source file
+        let modified = metadata.modified()?;
+        let accessed = metadata.accessed()?;
+        
+        // Set the times on the destination file
+        // We'll use std::fs here as tokio doesn't provide async methods for setting file times
+        tokio::task::spawn_blocking({
+            let dest = dest.to_path_buf();
+            move || -> Result<()> {
+                // On Unix systems, we can also preserve the creation time, but it's not portable
+                // For now, we'll just preserve modified and accessed times which are cross-platform
+                filetime::set_file_times(
+                    &dest,
+                    filetime::FileTime::from_system_time(accessed),
+                    filetime::FileTime::from_system_time(modified),
+                )?;
+                Ok(())
+            }
+        })
+        .await??;
 
         Ok(())
     }
